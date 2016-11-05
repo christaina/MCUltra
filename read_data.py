@@ -2,9 +2,11 @@ import xml.etree.ElementTree as ET
 import re
 import os
 import pickle
+import sys
 
 dir = '/scratch/ceb545/nlp/project/who_did_what/Strict/'
-fi = 'val.xml'
+#fi = 'train.xml'
+fi = sys.argv[1]
 
 passage_out = 'context.txt'
 question_out = 'qu.txt'
@@ -67,6 +69,8 @@ def process_question(question_child):
     for child in question_child:
         if ((child.tag =='leftcontext')|(child.tag=='rightcontext')):
             if child.text!=None:
+                if child.tag=='rightcontext':
+                    question_str += 'xxx'
                 question_str += child.text
     return clean_str(question_str)
 
@@ -88,6 +92,7 @@ def rootstuff(root, pa_fi,q_fi,ch_fi,lab_fi):
         ch_fi.write("%s\n"%('$$$'.join(choices)))
 
 if __name__=='__main__':
+    file = sys.argv[1]
     create_dirs()
     pa_fi,q_fi,ch_fi,lab_fi = open_fi()
 
