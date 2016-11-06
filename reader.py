@@ -113,15 +113,15 @@ def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
     tr_lab = os.path.join(train_path, labels_fn)
 
     questions_file = open(tr_qu, "r")
-    questions = strip_punctuation(questions_file.readlines())[:2000]
+    questions = strip_punctuation(questions_file.readlines())
     questions_file.close()
 
     context_file = open(tr_cont, "r")
-    context = strip_punctuation(context_file.readlines())[:2000]
+    context = strip_punctuation(context_file.readlines())
     context_file.close()
 
     choices_file = open(tr_ch, "r")
-    choices = choices_file.readlines()[:2000]
+    choices = choices_file.readlines()
     choices_file.close()
     all_choices = []
     list_of_choices = []
@@ -140,7 +140,7 @@ def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
 
     labels_file = open(tr_lab, "r")
     labels = le.transform(
-        [label.strip() for label in labels_file.readlines()[:2000]]
+        [label.strip() for label in labels_file.readlines()
     )
     labels_file.close()
     encoded_context = encode_context_with_entities(
