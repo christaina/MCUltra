@@ -5,9 +5,32 @@ from __future__ import print_function
 
 import collections
 import os
+from string import punctuation
 import re
 import numpy as np
 import tensorflow as tf
+from sklearn.preprocessing import LabelEncoder
+
+
+def clean_str(string):
+    """
+    Tokenization/string cleaning for all datasets except for SST.
+    Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
+    """
+    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)
+    string = re.sub(r"\'s", " \'s", string)
+    string = re.sub(r"\'ve", " \'ve", string)
+    string = re.sub(r"n\'t", " n\'t", string)
+    string = re.sub(r"\'re", " \'re", string)
+    string = re.sub(r"\'d", " \'d", string)
+    string = re.sub(r"\'ll", " \'ll", string)
+    string = re.sub(r",", " , ", string)
+    string = re.sub(r"!", " ! ", string)
+    string = re.sub(r"\(", " \( ", string)
+    string = re.sub(r"\)", " \) ", string)
+    string = re.sub(r"\?", " \? ", string)
+    string = re.sub(r"\s{2,}", " ", string)
+    return string.strip().lower()
 
 
 def _read_words(filename):
@@ -16,105 +39,59 @@ def _read_words(filename):
     return [re.split('[$$$\s]', x) for x in fi]
 
 
-def build_vocab(questions_file, context_file, choices_file):
-  # right now counts across all fns
-    data = []
-    for filename in [questions_file, context_file]:
-        data_curr = _read_words(filename)
-        data.extend(data_curr)
-    all_words = [item for sublist in data for item in sublist]
+def build_vocab(questions, encoded_context, word_cutoff=50000):
+    data = [questions, encoded_context]
+    all_words = [token for sublist in data for item in sublist for token in item.split()]
 
     counter = collections.Counter(all_words)
     count_pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
 
     # Get top-50000 words
-    count_pairs = count_pairs[:50000]
+    count_pairs = count_pairs[:word_cutoff]
 
     words, _ = list(zip(*count_pairs))
     word_to_id = dict(zip(words, range(len(words))))
-
-    # Add choices not in the top-50000 to word_to_id
-    choices_file = open(choices_file, "r")
-    for line in choices_file.readlines():
-        for choice in line.strip().split("$$$"):
-            if choice not in word_to_id:
-                word_to_id[choice] = 1
-    choices_file.close()
     return word_to_id
 
 
-def _file_to_word_ids(filename, word_to_id):
-    data = _read_words(filename)
-    for i, l in enumerate(data):
-        data[i] = [word_to_id[word] for word in l if word in word_to_id]
+def _word_to_word_ids(words, word_to_id):
+    data = []
+    for l in words:
+        data.append([word_to_id.get(word, 50000) for word in l.split()])
     return data
 
-def pad(m):
-    max_size = max([len(s) for s in m])
+
+def pad(m, max_size):
     new = 100000 * np.ones((len(m), max_size))
     for sentence_ind, word_indices in enumerate(m):
         new[sentence_ind, :len(word_indices)] = word_indices
     return new
 
-def ptb_raw_data(data_path=None):
-    """Load PTB raw data from data directory "data_path".
 
-    Reads PTB text files, converts strings to integer ids,
-    and performs mini-batching of the inputs.
-
-    Args:
-    data_path: string path to the directory where simple-examples.tgz has
-      been extracted.
-
-    Returns:
-    tuple (train_data, valid_data, test_data, vocabulary)
-    where each of the data objects can be passed to PTBIterator.
+def strip_punctuation(lines):
     """
-    qu_fn = 'qu.txt'
-    context_fn = 'context.txt'
-    choice_fn = 'choices.txt'
-    labels_fn = 'labels.txt'
+    Strip punctuation from a list of lines
+    """
+    stripped_lines = []
+    for line in lines:
+        stripped_lines.append(
+            ' '.join([token for token in clean_str(line).split(' ') if token not in punctuation])
+        )
+    return stripped_lines
 
-    train_path = os.path.join(data_path, "train")
-    valid_path = os.path.join(data_path, "val")
-    test_path = os.path.join(data_path, "test")
 
-    tr_qu = os.path.join(train_path, qu_fn)
-    tr_cont = os.path.join(train_path, context_fn)
-    tr_ch = os.path.join(train_path, choice_fn)
-    tr_lab = os.path.join(train_path, labels_fn)
+def encode_context_with_entities(contexts, choices, choice_to_id):
+    """
+    Replace all entities in the questions with their corresponding id's
+    as given by choice_to_id
+    """
+    encoded_context = []
+    for qs_choice, context in zip(choices, contexts):
+        for choice in qs_choice:
+            context = context.replace(choice, "entity_" + str(choice_to_id[choice]))
+        encoded_context.append(context)
+    return encoded_context
 
-    val_qu = os.path.join(valid_path, qu_fn)
-    val_cont = os.path.join(valid_path, context_fn)
-    val_ch = os.path.join(valid_path, choice_fn)
-    val_lab = os.path.join(valid_path, labels_fn)
-
-    te_qu = os.path.join(test_path, qu_fn)
-    te_cont = os.path.join(test_path, context_fn)
-    te_ch = os.path.join(test_path, choice_fn)
-    te_lab = os.path.join(test_path, labels_fn)
-
-    word_to_id = _build_vocab([tr_qu, tr_cont])
-    train_data_cont = pad(_file_to_word_ids(tr_cont, word_to_id))
-    train_data_qu = pad(_file_to_word_ids(tr_qu, word_to_id))
-    train_data_ch = _file_to_word_ids((tr_ch), word_to_id)
-    train_data_lab = _file_to_word_ids(tr_lab, word_to_id)
-
-    valid_data_cont = pad(_file_to_word_ids(val_cont, word_to_id))
-    valid_data_qu = pad(_file_to_word_ids(val_qu, word_to_id))
-    valid_data_ch = _file_to_word_ids((val_ch), word_to_id)
-    valid_data_lab = _file_to_word_ids(val_lab, word_to_id)
-
-    test_data_cont = pad(_file_to_word_ids(te_cont, word_to_id))
-    test_data_qu = pad(_file_to_word_ids(te_qu, word_to_id))
-    test_data_ch = _file_to_word_ids((te_ch), word_to_id)
-    test_data_lab = _file_to_word_ids(te_lab, word_to_id)
-
-    vocabulary = len(word_to_id)
-
-    return (train_data_cont, train_data_qu, train_data_ch, train_data_lab),\
-          (valid_data_cont, valid_data_qu), \
-          (test_data_cont, test_data_qu), vocabulary
 
 def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
     """
@@ -136,37 +113,70 @@ def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
     tr_lab = os.path.join(train_path, labels_fn)
 
     questions_file = open(tr_qu, "r")
-    questions = questions_file.readlines()
+    questions = strip_punctuation(questions_file.readlines())[:2000]
     questions_file.close()
 
     context_file = open(tr_cont, "r")
-    context = context_file.readlines()
+    context = strip_punctuation(context_file.readlines())[:2000]
     context_file.close()
 
     choices_file = open(tr_ch, "r")
-    choices = choices_file.readlines()
+    choices = choices_file.readlines()[:2000]
     choices_file.close()
+    all_choices = []
+    list_of_choices = []
+
+    for choice in choices:
+        all_choices.extend([t for t in choice.strip().split("$$$")])
+        list_of_choices.append([t for t in choice.strip().split("$$$")])
+    le = LabelEncoder()
+    le.fit(all_choices)
+    choice_to_id = dict(zip(le.classes_, range(len(le.classes_))))
+    id_to_choice = dict(zip(range(len(le.classes_)), le.classes_))
+
+    encoded_choices = []
+    for choice in choices:
+        encoded_choices.append([choice_to_id[t] for t in choice.strip().split("$$$")])
 
     labels_file = open(tr_lab, "r")
-    labels = labels_file.readlines()
+    labels = le.transform(
+        [label.strip() for label in labels_file.readlines()[:2000]]
+    )
     labels_file.close()
+    encoded_context = encode_context_with_entities(
+        context, list_of_choices, choice_to_id)
 
-    word_to_id = build_vocab(tr_qu, tr_cont, tr_ch)
-    return word_to_id
+    vocab = build_vocab(questions, encoded_context, word_cutoff=50000)
+    data_size = len(questions)
+    data_indices = np.arange(data_size)
+    num_batches_per_epoch = int(data_size / batch_size) + 1
 
-    # data_size = len(questions)
-    # data_indices = np.arange(data_size)
-    # num_batches_per_epoch = int(data_size / batch_size) + 1
-    # for epoch in range(num_epochs):
-    #     # Shuffle the data at each epoch
-    #     if shuffle:
-    #         shuffle_indices = rng.permutation(data_indices)
-    #         shuffled_qs = data[shuffle_indices]
-    #         shuffled_cont = context[shuffle_indices]
-    #         shuffled_choices = choices[shuffle_indices]
-    #         shuffled_labels = labels[shuffle_indices]
-    #
-    #     for batch_num in range(num_batches_per_epoch):
-    #         start_index = batch_num * batch_size
-    #         end_index = min((batch_num + 1) * batch_size, data_size)
-    #         yield shuffled_data[start_index:end_index]
+    questions = np.asarray(questions)
+    encoded_context = np.asarray(encoded_context)
+    encoded_choices = np.asarray(encoded_choices)
+    max_con_len = max([len(context.split(" ")) for context in encoded_context])
+    max_qs_len = max([len(question.split(" ")) for question in questions])
+    labels = np.asarray(labels)
+
+    for epoch in range(num_epochs):
+        # Shuffle the data at each epoch
+        shuffle_indices = rng.permutation(data_indices)
+        shuffled_qs = questions[shuffle_indices]
+        shuffled_cont = encoded_context[shuffle_indices]
+        shuffled_choices = encoded_choices[shuffle_indices]
+        shuffled_labels = labels[shuffle_indices]
+
+        for batch_num in range(num_batches_per_epoch):
+            start_index = batch_num * batch_size
+            end_index = min((batch_num + 1) * batch_size, data_size)
+            padded_qs = pad(
+                _word_to_word_ids(shuffled_qs[start_index:end_index], vocab),
+                max_qs_len)
+            padded_cont = pad(
+                _word_to_word_ids(shuffled_cont[start_index:end_index], vocab),
+                max_con_len)
+
+            yield (
+                padded_qs, padded_cont, shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index]
+            )
