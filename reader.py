@@ -140,7 +140,7 @@ def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
 
     labels_file = open(tr_lab, "r")
     labels = le.transform(
-        [label.strip() for label in labels_file.readlines()
+        [label.strip() for label in labels_file.readlines()]
     )
     labels_file.close()
     encoded_context = encode_context_with_entities(
