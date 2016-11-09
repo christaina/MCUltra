@@ -148,10 +148,13 @@ def load_data(data_path=None):
         choices[i] = [clean_str(x) for x in line]
     choices_file.close()
 
-    # Remove duplicate choices.
+    # Remove duplicate choices and replace the longest string
+    # first.
     new_choices = []
     for i, choice in enumerate(choices):
-        new_choices.append(list(set(choice)))
+        dup_choices = list(set(choice))
+        longest_first = sorted(dup_choices, key=lambda x: -len(x))
+        new_choices.append(longest_first)
 
     data_size = len(context)
     labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
