@@ -12,7 +12,7 @@ import tensorflow as tf
 from sklearn.preprocessing import LabelEncoder
 
 
-def clean_str(string):
+def clean_str(string, choice=False):
     """
     Tokenization/string cleaning for all datasets except for SST.
     Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
@@ -32,6 +32,13 @@ def clean_str(string):
     string = re.sub(r"\s{2,}", " ", string)
     string = re.sub(r"`", "'", string)
     string = string.replace("\\)", "rrb")
+    string = string.replace("\\)", "rrb")
+
+    # Remove pesky '' punctuations from the choices that
+    # cause incorrect matching.
+    if choice:
+        string = ' '.join([s.strip() for s in string.split("''")])
+
     return string.strip().lower()
 
 
@@ -146,7 +153,7 @@ def load_data(data_path=None):
     choices = choices_file.read().strip().split("\n")
     choices = [x.strip().split("$$$") for x in choices]
     for i, line in enumerate(choices):
-        choices[i] = [clean_str(x) for x in line]
+        choices[i] = [clean_str(x, choice=True) for x in line]
     choices_file.close()
 
     # Remove duplicate choices and replace the longest string
