@@ -30,6 +30,7 @@ def clean_str(string):
     string = re.sub(r"\)", " \) ", string)
     string = re.sub(r"\?", " \? ", string)
     string = re.sub(r"\s{2,}", " ", string)
+    string = re.sub(r"`", "'", string)
     return string.strip().lower()
 
 
@@ -37,6 +38,13 @@ def _read_words(filename):
     with tf.gfile.GFile(filename, "r") as f:
         fi = f.read().decode("utf-8").strip().split("\n")
     return [re.split('[$$$\s]', x) for x in fi]
+
+def build_choices(choices):
+    all_choices = [item for sublist in choices for item in sublist]
+    le = LabelEncoder()
+    le.fit(all_choices)
+    choice_to_id = dict(zip(le.classes_, range(len(le.classes_))))
+    return choice_to_id
 
 
 def build_vocab(questions, encoded_context, word_cutoff=50000):
@@ -79,7 +87,6 @@ def strip_punctuation(lines):
         )
     return stripped_lines
 
-
 def encode_context_with_entities(contexts, choices, choice_to_id):
     """
     Replace all entities in the questions with their corresponding id's
@@ -92,78 +99,98 @@ def encode_context_with_entities(contexts, choices, choice_to_id):
         encoded_context.append(context)
     return encoded_context
 
+def encode_choices(context,question,choices,label):
+    """
+    Assign numbers to entities based on occurence in document;
+    encode that choice in the document
+    """
+    entity_num = 0
+    choices_map = {}
+    new_context = context.split(" ")
+    new_question = question.split(" ")
+    word_ent_map = {}
+    new_word = None
+    new_label = None
 
-def batch_iter(data_path=None, batch_size=32, num_epochs=5, random_state=0):
-    """
-    Generates a batch iterator for a dataset.
-    """
-    rng = np.random.RandomState(0)
+    for choice in choices:
+        if choice not in choices_map.keys():
+            choices_map[choice] = "@entity%s"%entity_num
+            entity_num += 1
+        #if choice in context:
+        if choice not in context:
+            print("choice does notexist in context: %s"%choice)
+        context = context.replace(choice,choices_map[choice])
+        question = question.replace(choice,choices_map[choice])
+        label = label.replace(choice,choices_map[choice])
+    new_choices = [choices_map[x] for x in choices]
+    return context,question,new_choices,label
+
+def load_data(data_path=None):
     qu_fn = 'qu.txt'
     context_fn = 'context.txt'
     choice_fn = 'choices.txt'
     labels_fn = 'labels.txt'
-
     if data_path is None:
         data_path = os.getcwd()
+    qu_p = os.path.join(data_path, qu_fn)
+    cont_p = os.path.join(data_path, context_fn)
+    ch_p = os.path.join(data_path, choice_fn)
+    lab_p = os.path.join(data_path, labels_fn)
 
-    train_path = os.path.join(data_path, "train")
-    tr_qu = os.path.join(train_path, qu_fn)
-    tr_cont = os.path.join(train_path, context_fn)
-    tr_ch = os.path.join(train_path, choice_fn)
-    tr_lab = os.path.join(train_path, labels_fn)
-
-    questions_file = open(tr_qu, "r")
+    questions_file = open(qu_p, "r")
     questions = strip_punctuation(questions_file.readlines())
     questions_file.close()
 
-    context_file = open(tr_cont, "r")
+    context_file = open(cont_p, "r")
     context = strip_punctuation(context_file.readlines())
     context_file.close()
 
-    choices_file = open(tr_ch, "r")
-    choices = choices_file.readlines()
+    choices_file = open(ch_p, "r")
+    choices = open(ch_p).read().strip().split("\n")
+    choices = [x.strip().split("$$$") for x in choices]
+    for i,line in enumerate(choices):
+        choices[i] = [clean_str(x) for x in line]
     choices_file.close()
-    all_choices = []
-    list_of_choices = []
 
-    for choice in choices:
-        all_choices.extend([t for t in choice.strip().split("$$$")])
-        list_of_choices.append([t for t in choice.strip().split("$$$")])
-    le = LabelEncoder()
-    le.fit(all_choices)
-    choice_to_id = dict(zip(le.classes_, range(len(le.classes_))))
-    id_to_choice = dict(zip(range(len(le.classes_)), le.classes_))
+    data_size = len(context)
 
-    encoded_choices = []
-    for choice in choices:
-        encoded_choices.append([choice_to_id[t] for t in choice.strip().split("$$$")])
+    labels = open(lab_p).read().strip().split("\n")
 
-    labels_file = open(tr_lab, "r")
-    labels = le.transform(
-        [label.strip() for label in labels_file.readlines()]
-    )
-    labels_file.close()
-    encoded_context = encode_context_with_entities(
-        context, list_of_choices, choice_to_id)
+    for i in range(data_size):
+        context[i],questions[i],choices[i],labels[i] =\
+                encode_choices(context[i],\
+                questions[i],\
+                choices[i],\
+                labels[i])
+    return context,questions,choices,labels
 
-    vocab = build_vocab(questions, encoded_context, word_cutoff=50000)
-    data_size = len(questions)
+
+def batch_iter(context,questions,choices,labels,vocab,
+        batch_size=32, num_epochs=5, random_state=0):
+    """
+    Generates a batch iterator for a dataset.
+    """
+    rng = np.random.RandomState(0)
+
+    data_size = len(context)
     data_indices = np.arange(data_size)
     num_batches_per_epoch = int(data_size / batch_size) + 1
 
-    questions = np.asarray(questions)
-    encoded_context = np.asarray(encoded_context)
-    encoded_choices = np.asarray(encoded_choices)
-    max_con_len = max([len(context.split(" ")) for context in encoded_context])
+    max_con_len = max([len(cont.split(" ")) for cont in context])
     max_qs_len = max([len(question.split(" ")) for question in questions])
+
+    questions = np.asarray(questions)
+    context = np.asarray(context)
+    choices = np.asarray(choices)
+
     labels = np.asarray(labels)
 
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
         shuffle_indices = rng.permutation(data_indices)
         shuffled_qs = questions[shuffle_indices]
-        shuffled_cont = encoded_context[shuffle_indices]
-        shuffled_choices = encoded_choices[shuffle_indices]
+        shuffled_cont = context[shuffle_indices]
+        shuffled_choices = choices[shuffle_indices]
         shuffled_labels = labels[shuffle_indices]
 
         for batch_num in range(num_batches_per_epoch):
