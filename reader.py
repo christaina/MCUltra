@@ -32,8 +32,9 @@ def clean_str(string, choice=False):
     string = re.sub(r"\s{2,}", " ", string)
     string = re.sub(r"`", "'", string)
     string = string.replace("\\)", "rrb")
-    string = string.replace("\\(", "llb")
+    string = string.replace("\\(", "lrb")
     string = string.replace("''", " ")
+    string = string.replace("' ", " ")
     return string.strip().lower()
 
 
