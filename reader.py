@@ -87,19 +87,8 @@ def strip_punctuation(lines):
         )
     return stripped_lines
 
-def encode_context_with_entities(contexts, choices, choice_to_id):
-    """
-    Replace all entities in the questions with their corresponding id's
-    as given by choice_to_id
-    """
-    encoded_context = []
-    for qs_choice, context in zip(choices, contexts):
-        for choice in qs_choice:
-            context = context.replace(choice, "entity_" + str(choice_to_id[choice]))
-        encoded_context.append(context)
-    return encoded_context
 
-def encode_choices(context,question,choices,label):
+def encode_choices(context, question, choices, label):
     """
     Assign numbers to entities based on occurence in document;
     encode that choice in the document
@@ -113,19 +102,26 @@ def encode_choices(context,question,choices,label):
     new_label = None
 
     for choice in choices:
-        if choice not in choices_map.keys():
-            choices_map[choice] = "@entity%s"%entity_num
+        if choice not in choices_map:
+            choices_map[choice] = "@entity%s" % entity_num
             entity_num += 1
-        #if choice in context:
         if choice not in context:
-            print("choice does notexist in context: %s"%choice)
-        context = context.replace(choice,choices_map[choice])
-        question = question.replace(choice,choices_map[choice])
-        label = label.replace(choice,choices_map[choice])
+            print("choice does notexist in context: %s" % choice)
+        context = context.replace(choice, choices_map[choice])
+        question = question.replace(choice, choices_map[choice])
+        label = label.replace(choice, choices_map[choice])
     new_choices = [choices_map[x] for x in choices]
-    return context,question,new_choices,label
+    return context, question, new_choices, label
 
 def load_data(data_path=None):
+    """
+    Return a tuple of a
+
+    1. List of contexts.
+    2. List of questions.
+    3. List of choices.
+    4. List of labels.
+    """
     qu_fn = 'qu.txt'
     context_fn = 'context.txt'
     choice_fn = 'choices.txt'
@@ -146,27 +142,32 @@ def load_data(data_path=None):
     context_file.close()
 
     choices_file = open(ch_p, "r")
-    choices = open(ch_p).read().strip().split("\n")
+    choices = choices_file.read().strip().split("\n")
     choices = [x.strip().split("$$$") for x in choices]
-    for i,line in enumerate(choices):
+    for i, line in enumerate(choices):
         choices[i] = [clean_str(x) for x in line]
     choices_file.close()
 
-    data_size = len(context)
+    # Remove duplicate choices.
+    new_choices = []
+    for i, choice in enumerate(choices):
+        new_choices.append(list(set(choice)))
 
-    labels = open(lab_p).read().strip().split("\n")
+    data_size = len(context)
+    labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
 
     for i in range(data_size):
-        context[i],questions[i],choices[i],labels[i] =\
-                encode_choices(context[i],\
-                questions[i],\
-                choices[i],\
-                labels[i])
-    return context,questions,choices,labels
+        context[i], questions[i], new_choices[i], labels[i] = \
+                encode_choices(
+                    context[i],
+                    questions[i],
+                    new_choices[i],
+                    labels[i])
+    return context, questions, new_choices, labels
 
 
-def batch_iter(context,questions,choices,labels,vocab,
-        batch_size=32, num_epochs=5, random_state=0):
+def batch_iter(context, questions, choices, labels, vocab,
+               batch_size=32, num_epochs=5, random_state=0):
     """
     Generates a batch iterator for a dataset.
     """
