@@ -88,7 +88,7 @@ def strip_punctuation(lines):
     return stripped_lines
 
 
-def encode_choices(context, question, choices, label):
+def encode_choices(context, question, choices, label, i):
     """
     Assign numbers to entities based on occurence in document;
     encode that choice in the document
@@ -106,7 +106,7 @@ def encode_choices(context, question, choices, label):
             choices_map[choice] = "@entity%s" % entity_num
             entity_num += 1
         if choice not in context:
-            print("choice does notexist in context: %s" % choice)
+            print("choice does notexist in context: %s, id %d" % (choice, i))
         context = context.replace(choice, choices_map[choice])
         question = question.replace(choice, choices_map[choice])
         label = label.replace(choice, choices_map[choice])
@@ -165,7 +165,7 @@ def load_data(data_path=None):
                     context[i],
                     questions[i],
                     new_choices[i],
-                    labels[i])
+                    labels[i], i)
     return context, questions, new_choices, labels
 
 
