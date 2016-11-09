@@ -32,13 +32,8 @@ def clean_str(string, choice=False):
     string = re.sub(r"\s{2,}", " ", string)
     string = re.sub(r"`", "'", string)
     string = string.replace("\\)", "rrb")
-    string = string.replace("\\)", "rrb")
-
-    # Remove pesky '' punctuations from the choices that
-    # cause incorrect matching.
-    if choice:
-        string = ' '.join([s.strip() for s in string.split("''")])
-
+    string = string.replace("\\(", "llb")
+    string = string.replace("''", " ")
     return string.strip().lower()
 
 
@@ -152,8 +147,8 @@ def load_data(data_path=None):
     choices_file = open(ch_p, "r")
     choices = choices_file.read().strip().split("\n")
     choices = [x.strip().split("$$$") for x in choices]
-    for i, line in enumerate(choices):
-        choices[i] = [clean_str(x, choice=True) for x in line]
+    for i, lines in enumerate(choices):
+        choices[i] = strip_punctuation(lines)
     choices_file.close()
 
     # Remove duplicate choices and replace the longest string
