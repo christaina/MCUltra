@@ -12,7 +12,7 @@ import tensorflow as tf
 from sklearn.preprocessing import LabelEncoder
 
 
-def clean_str(string, choice=False):
+def clean_str(string):
     """
     Tokenization/string cleaning for all datasets except for SST.
     Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
@@ -31,10 +31,6 @@ def clean_str(string, choice=False):
     string = re.sub(r"\?", " \? ", string)
     string = re.sub(r"\s{2,}", " ", string)
     string = re.sub(r"`", "'", string)
-    string = string.replace("\\)", "rrb")
-    string = string.replace("\\(", "lrb")
-    string = string.replace("''", " ")
-    string = string.replace("' ", " ")
     return string.strip().lower()
 
 
@@ -52,9 +48,6 @@ def build_choices(choices):
 
 
 def build_vocab(questions, encoded_context, word_cutoff=50000):
-    """
-    Builds vocabulary and returns dict mapping words to ids
-    """
     data = [questions, encoded_context]
     all_words = [token for sublist in data for item in sublist for token in item.split()]
 
@@ -66,14 +59,13 @@ def build_vocab(questions, encoded_context, word_cutoff=50000):
 
     words, _ = list(zip(*count_pairs))
     word_to_id = dict(zip(words, range(len(words))))
-    word_to_id['<unk>']=max(word_to_id.values())+1
     return word_to_id
 
 
 def _word_to_word_ids(words, word_to_id):
     data = []
     for l in words:
-        data.append([word_to_id.get(word, max(word_to_id.values())+1) for word in l.split()])
+        data.append([word_to_id.get(word, 50000) for word in l.split()])
     return data
 
 
@@ -95,8 +87,19 @@ def strip_punctuation(lines):
         )
     return stripped_lines
 
+def encode_context_with_entities(contexts, choices, choice_to_id):
+    """
+    Replace all entities in the questions with their corresponding id's
+    as given by choice_to_id
+    """
+    encoded_context = []
+    for qs_choice, context in zip(choices, contexts):
+        for choice in qs_choice:
+            context = context.replace(choice, "entity_" + str(choice_to_id[choice]))
+        encoded_context.append(context)
+    return encoded_context
 
-def encode_choices(context, question, choices, label, i):
+def encode_choices(context,question,choices,label):
     """
     Assign numbers to entities based on occurence in document;
     encode that choice in the document
@@ -110,26 +113,19 @@ def encode_choices(context, question, choices, label, i):
     new_label = None
 
     for choice in choices:
-        if choice not in choices_map:
-            choices_map[choice] = "@entity%s" % entity_num
+        if choice not in choices_map.keys():
+            choices_map[choice] = "@entity%s"%entity_num
             entity_num += 1
+        #if choice in context:
         if choice not in context:
-            print("choice does notexist in context: %s, id %d" % (choice, i))
-        context = context.replace(choice, choices_map[choice])
-        question = question.replace(choice, choices_map[choice])
-        label = label.replace(choice, choices_map[choice])
+            print("choice does notexist in context: %s"%choice)
+        context = context.replace(choice,choices_map[choice])
+        question = question.replace(choice,choices_map[choice])
+        label = label.replace(choice,choices_map[choice])
     new_choices = [choices_map[x] for x in choices]
-    return context, question, new_choices, label
+    return context,question,new_choices,label
 
-def load_data(data_path=None,cutoff=None):
-    """
-    Return a tuple of a
-
-    1. List of contexts.
-    2. List of questions.
-    3. List of choices.
-    4. List of labels.
-    """
+def load_data(data_path=None):
     qu_fn = 'qu.txt'
     context_fn = 'context.txt'
     choice_fn = 'choices.txt'
@@ -150,48 +146,27 @@ def load_data(data_path=None,cutoff=None):
     context_file.close()
 
     choices_file = open(ch_p, "r")
-    choices = choices_file.read().strip().split("\n")
+    choices = open(ch_p).read().strip().split("\n")
     choices = [x.strip().split("$$$") for x in choices]
-    for i, lines in enumerate(choices):
-        choices[i] = strip_punctuation(lines)
+    for i,line in enumerate(choices):
+        choices[i] = [clean_str(x) for x in line]
     choices_file.close()
 
-    # Remove duplicate choices and replace the longest string
-    # first.
-    new_choices = []
-    for i, choice in enumerate(choices):
-        dup_choices = list(set(choice))
-        longest_first = sorted(dup_choices, key=lambda x: -len(x))
-        new_choices.append(longest_first)
-
     data_size = len(context)
-    labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
+
+    labels = open(lab_p).read().strip().split("\n")
 
     for i in range(data_size):
-        context[i], questions[i], new_choices[i], labels[i] = \
-                encode_choices(
-                    context[i],
-                    questions[i],
-                    new_choices[i],
-                    labels[i], i)
-    return context, questions, new_choices, labels
+        context[i],questions[i],choices[i],labels[i] =\
+                encode_choices(context[i],\
+                questions[i],\
+                choices[i],\
+                labels[i])
+    return context,questions,choices,labels
 
-def map_to_vocab(mat,vocab,vocab_words):
-    was_string = False
-    enc_mat = []
-    for line in mat:
-        # choices are already in a list..
-        if isinstance(line,basestring):
-            was_string=True
-            line = line.split(" ")
-        line = [vocab[x] if x in vocab_words else vocab['<unk>'] for x in line]
-        #if was_string:
-        #    line = " ".join(line)
-        enc_mat.append(line)
-    return enc_mat
 
-def batch_iter(context, questions, choices, labels, vocab,
-               batch_size=32, num_epochs=5, random_state=0):
+def batch_iter(context,questions,choices,labels,vocab,
+        batch_size=32, num_epochs=5, random_state=0):
     """
     Generates a batch iterator for a dataset.
     """
@@ -204,13 +179,12 @@ def batch_iter(context, questions, choices, labels, vocab,
     max_con_len = max([len(cont.split(" ")) for cont in context])
     max_qs_len = max([len(question.split(" ")) for question in questions])
 
-    vocab_words = set(vocab.keys())
-
     questions = np.asarray(questions)
     context = np.asarray(context)
     choices = np.asarray(choices)
+
     labels = np.asarray(labels)
-    
+
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
         shuffle_indices = rng.permutation(data_indices)
@@ -222,7 +196,6 @@ def batch_iter(context, questions, choices, labels, vocab,
         for batch_num in range(num_batches_per_epoch):
             start_index = batch_num * batch_size
             end_index = min((batch_num + 1) * batch_size, data_size)
-            
             padded_qs = pad(
                 _word_to_word_ids(shuffled_qs[start_index:end_index], vocab),
                 max_qs_len)
@@ -230,12 +203,7 @@ def batch_iter(context, questions, choices, labels, vocab,
                 _word_to_word_ids(shuffled_cont[start_index:end_index], vocab),
                 max_con_len)
 
-            mapped_choices = []
-            for i,li in enumerate(shuffled_choices[start_index:end_index]):
-                mapped_choices.append([vocab[x] for x in li])
-            
             yield (
-                padded_qs.astype(int), padded_cont.astype(int),\
-                        mapped_choices,
-                _word_to_word_ids(shuffled_labels[start_index: end_index],vocab)
+                padded_qs, padded_cont, shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index]
             )
