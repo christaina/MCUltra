@@ -119,7 +119,7 @@ def encode_choices(context, question, choices, label, i):
         question = question.replace(choice, choices_map[choice])
         label = label.replace(choice, choices_map[choice])
     new_choices = [choices_map[x] for x in choices]
-    return context, question, new_choices, label
+    return context, question, new_choices,label,choices_map
 
 def load_data(data_path=None,cutoff=None):
     """
@@ -159,6 +159,7 @@ def load_data(data_path=None,cutoff=None):
     # Remove duplicate choices and replace the longest string
     # first.
     new_choices = []
+    choices_map_all = []
     for i, choice in enumerate(choices):
         dup_choices = list(set(choice))
         longest_first = sorted(dup_choices, key=lambda x: -len(x))
@@ -168,13 +169,14 @@ def load_data(data_path=None,cutoff=None):
     labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
 
     for i in range(data_size):
-        context[i], questions[i], new_choices[i], labels[i] = \
+        context[i], questions[i], new_choices[i], labels[i],choices_map = \
                 encode_choices(
                     context[i],
                     questions[i],
                     new_choices[i],
                     labels[i], i)
-    return context, questions, new_choices, labels
+        choices_map_all.append(choices_map)
+    return context, questions, new_choices, labels,choices_map_all
 
 def map_to_vocab(mat,vocab,vocab_words):
     was_string = False
@@ -190,7 +192,7 @@ def map_to_vocab(mat,vocab,vocab_words):
         enc_mat.append(line)
     return enc_mat
 
-def batch_iter(context, questions, choices, labels, vocab,
+def batch_iter(context, questions, choices, choices_map, labels, vocab,
                batch_size=32, num_epochs=5, random_state=0):
     """
     Generates a batch iterator for a dataset.
@@ -208,7 +210,11 @@ def batch_iter(context, questions, choices, labels, vocab,
 
     questions = np.asarray(questions)
     context = np.asarray(context)
+    choices_map = np.asarray(choices_map)
     choices = np.asarray(choices)
+    print(len(choices_map))
+    print(len(choices))
+
     labels = np.asarray(labels)
     
     for epoch in range(num_epochs):
@@ -217,6 +223,7 @@ def batch_iter(context, questions, choices, labels, vocab,
         shuffled_qs = questions[shuffle_indices]
         shuffled_cont = context[shuffle_indices]
         shuffled_choices = choices[shuffle_indices]
+        shuffled_map = choices_map[shuffle_indices]
         shuffled_labels = labels[shuffle_indices]
 
         for batch_num in range(num_batches_per_epoch):
@@ -238,4 +245,4 @@ def batch_iter(context, questions, choices, labels, vocab,
                 padded_qs.astype(int), padded_cont.astype(int),\
                         mapped_choices,
                 _word_to_word_ids(shuffled_labels[start_index: end_index],vocab)
-            )
+            ,choices_map )
