@@ -120,7 +120,7 @@ class GenInput(object):
   def __init__(self, config, data_path=None, vocabulary=None,name=None):
     self.batch_size = batch_size = config.batch_size
     self.num_steps = num_steps = config.num_steps
-    raw_context,raw_questions,raw_choices,raw_labels,self.choices_map = \
+    raw_context, raw_questions, raw_choices, raw_labels, self.choices_map = \
             read.load_data(data_path)
     all_choices = read.build_choices(raw_choices)
     self.epoch_size = ((len(raw_context) // batch_size) - 1) // num_steps
@@ -129,10 +129,10 @@ class GenInput(object):
         self.vocabulary = read.get_vocab(raw_questions,\
                 raw_context,min_frequency=500)
     else:
-        self.vocabulary=vocabulary
+        self.vocabulary = vocabulary
 
     raw_choices = [" ".join(x) for x in raw_choices]
-    self.all_choices = read.vocab_transform(all_choices,self.vocabulary) 
+    self.all_choices = read.vocab_transform(all_choices,self.vocabulary)
     self.questions = read.vocab_transform(raw_questions,self.vocabulary)
     self.context = read.vocab_transform(raw_context,self.vocabulary)
     self.labels = read.vocab_transform(raw_labels,self.vocabulary)
@@ -184,7 +184,7 @@ class PTBModel(object):
                     inputs, \
                     initial_state_fw=self._initial_state[0],\
                     initial_state_bw=self._initial_state[1])
-    
+
     print("Recieved output tensor %s long"%len(outputs))
     print("Each element has shape %s"%outputs[0].get_shape())
     concat_outputs = tf.concat(1,outputs)
@@ -203,7 +203,7 @@ class PTBModel(object):
     y_ext = tf.expand_dims(input_.targets,2)
     y_doubles = tf.concat(2,[y_ext,y_ext])
     print("new y shape: %s"%y_doubles.get_shape())
-    y_grp = tf.reshape(y_doubles,[batch_size,-1]) 
+    y_grp = tf.reshape(y_doubles,[batch_size,-1])
     loss_weights = tf.ones([batch_size * num_steps * 2],dtype=data_type())
     print("y shape: %s"%y_grp.get_shape())
     loss = tf.nn.seq2seq.sequence_loss_by_example(

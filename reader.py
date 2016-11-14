@@ -18,15 +18,8 @@ def get_vocab(questions, context, min_frequency=500):
     vocab_data.extend(context)
 
     max_length = max([len(row.split(" ")) for row in vocab_data])
-    """
-    vocab_pad = pad(vocab_data,max_length)
-    q_pad = pad(questions,max_length)
-    cont_pad = pad(context,max_length)
-    choices_pad = pad(choices,max_length)
-    labels_pad = pad(labels,max_length)
-    """
-
-    vocab_processor = learn.preprocessing.VocabularyProcessor(max_length,min_frequency=min_frequency)
+    vocab_processor = learn.preprocessing.VocabularyProcessor(
+        max_length, min_frequency=min_frequency)
     vocab_processor.fit(vocab_data)
     print("done fitting vocab!")
     return vocab_processor
@@ -102,20 +95,6 @@ def build_vocab(questions, encoded_context, word_cutoff=50000):
     return word_to_id
 
 
-def _word_to_word_ids(words, word_to_id):
-    data = []
-    for i,l in enumerate(words):
-        data.append([word_to_id.get(word, max(word_to_id.values())+1) for word in l.split()])
-    return data
-
-
-def pad(m, max_size):
-    new = np.zeros((len(m), max_size))
-    for sentence_ind, word_indices in enumerate(m):
-        new[sentence_ind, :len(word_indices)] = word_indices
-    return new
-
-
 def strip_punctuation(lines):
     """
     Strip punctuation from a list of lines
@@ -153,7 +132,7 @@ def encode_choices(context, question, choices, label, i):
     new_choices = [choices_map[x] for x in choices]
     return context, question, new_choices,label,choices_map
 
-def load_data(data_path=None,cutoff=None):
+def load_data(data_path=None, cutoff=None):
     """
     Return a tuple of a
 
@@ -201,44 +180,17 @@ def load_data(data_path=None,cutoff=None):
     labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
 
     for i in range(data_size):
-        context[i], questions[i], new_choices[i], labels[i],choices_map = \
+        context[i], questions[i], new_choices[i], labels[i], choices_map = \
                 encode_choices(
                     context[i],
                     questions[i],
                     new_choices[i],
                     labels[i], i)
         choices_map_all.append(choices_map)
-    """
-    rng = np.random.RandomState(0)
-    shuffle_indices = rng.permutation(np.arange(len(context)))
 
-    questions = np.asarray(questions)[shuffle_indices]
-    context = np.asarray(context)[shuffle_indices]
-    new_choices = np.asarray(new_choices)[shuffle_indices]
-    choices_map_all = np.asarray(choices_map_all)[shuffle_indices]
-    labels = np.asarray(labels)[shuffle_indices]
-    """
-    return context, questions, new_choices, labels,choices_map_all
+    return (
+        context, questions, new_choices, labels, choices_map_all)
 
-def map_to_vocab(mat,vocab,vocab_words):
-    was_string = False
-    enc_mat = []
-    for line in mat:
-        # choices are already in a list..
-        if isinstance(line,basestring):
-            was_string=True
-            line = line.split(" ")
-        line = [vocab[x] if x in vocab_words else vocab['<unk>'] for x in line]
-        #if was_string:
-        #    line = " ".join(line)
-        enc_mat.append(line)
-    return enc_mat
-
-def pad_data(data,vocabulary):
-  max_length = max([len(row.split(" ")) for row in data])
-  print("Padding..")
-  padded_data = pad(_word_to_word_ids(data,vocabulary),max_length)
-  return padded_data
 
 def ptb_producer(context,questions,choices,labels,\
         name=None,num_steps=20,batch_size=20):
@@ -272,32 +224,58 @@ def ptb_producer(context,questions,choices,labels,\
     y = tf.slice(y_expanded, [0, i * num_steps], [batch_size, num_steps])
     return x, y
 
-def batch_iter(context, questions, choices, choices_map, labels, vocab,
-               batch_size=32, num_epochs=5, random_state=0):
+
+def batch_iter(data_path,
+               batch_size=32, num_epochs=5, random_state=0,
+               context_num_steps=20,
+               question_num_steps=20,
+               vocabulary=None):
     """
     Generates a batch iterator for a dataset.
     """
-    rng = np.random.RandomState(0)
+    rng = np.random.RandomState(random_state)
 
+    raw_context, raw_questions, raw_choices, raw_labels, choices_map = \
+        load_data(data_path)
+    all_choices = build_choices(raw_choices)
+
+    # build vocab for train data
+    if not vocabulary:
+        vocabulary = get_vocab(raw_questions, raw_context, min_frequency=10)
+
+    questions = vocab_transform(raw_questions, vocabulary)
+    context = vocab_transform(raw_context, vocabulary)
     data_size = len(context)
     data_indices = np.arange(data_size)
     num_batches_per_epoch = int(data_size / batch_size)
+
+    cont_len = context.shape[1]
+    cont_lim = (cont_len // cont_num_steps) * cont_num_steps
+    qs_len = questions.shape[1]
+    qs_lim = (qs_len // qs_num_steps) * qs_num_steps
 
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
         shuffle_indices = rng.permutation(data_indices)
         shuffled_qs = questions[shuffle_indices]
         shuffled_cont = context[shuffle_indices]
-        shuffled_choices = choices[shuffle_indices]
+        shuffled_choices = raw_choices[shuffle_indices]
         shuffled_map = choices_map[shuffle_indices]
-        shuffled_labels = labels[shuffle_indices]
+        shuffled_labels = raw_labels[shuffle_indices]
 
         for batch_num in range(num_batches_per_epoch):
             start_index = batch_num * batch_size
             end_index = start_index + batch_size
+            curr_qs_batch = shuffled_qs[start_index: end_index]
+            curr_cont_batch = shuffled_cont[start_index: end_index]
+
+            cont_batches = [curr_cont_batch[:, start_ind: start_ind + cont_num_steps]
+                            for start_ind in range(0, cont_lim, cont_num_steps)]
+            qs_batches = [curr_qs_batch[:, start_ind: start_ind + qs_num_steps]
+                            for start_ind in range(0, qs_lim, qs_num_steps)]
             yield (
-                shuffled_qs[start_index: end_index],
-                shuffled_cont[start_index: end_index],
+                qs_batches,
+                cont_batches,
                 shuffled_choices[start_index: end_index],
                 shuffled_labels[start_index: end_index],
                 shuffled_map[start_index: end_index])
