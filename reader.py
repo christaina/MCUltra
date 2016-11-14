@@ -35,6 +35,9 @@ def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
     return mat.T[~mask].T
 
+def vocab_transform(mat,vocab):
+    return mask_narrow(np.array(list(vocab.transform(mat))))
+
 def fit_vocab(q,cont,choi,lab,vocab_processor):
     q = vocab_processor.transform(q)
     cont = vocab_processor.transform(cont)
@@ -237,42 +240,24 @@ def pad_data(data,vocabulary):
   padded_data = pad(_word_to_word_ids(data,vocabulary),max_length)
   return padded_data
 
-def ptb_producer(raw_data, name=None):
-  """Iterate on the raw PTB data.
-
-  This chunks up raw_data into batches of examples and returns Tensors that
-  are drawn from these batchesbb
-  Args:
-    raw_data: one of the raw data outputs from ptb_raw_data.
-    batch_size: int, the batch size.
-    num_steps: int, the number of unrolls.
-    name: the name of this operation (optional).
-
-  Returns:
-    A pair of Tensors, each shaped [batch_size, num_steps]. The second element
-    of the tuple is the same data time-shifted to the right by one.
-
-  Raises:
-    tf.errors.InvalidArgumentError: if batch_size or num_steps are too high.
-  """
+def ptb_producer(context,questions,choices,labels,\
+        name=None,num_steps=20,batch_size=20):
 
   rng = np.random.RandomState(0)
 
-  batch_size = raw_data.batch_size
-  num_steps = raw_data.num_steps
-  print("a")
-  print(len(raw_data.context))
-  print("b")
-  data = raw_data.context
+  data = context 
 
-  with tf.name_scope(name, "PTBProducer", [raw_data, batch_size, num_steps]):
+  with tf.name_scope(name, "PTBProducer", [data, batch_size, num_steps]):
     data = tf.convert_to_tensor(data, name="raw_data", dtype=tf.int32)
+    y_expanded = np.array([x[0]*np.ones(data.get_shape()[1]) for x in labels])
+    y_expanded = tf.convert_to_tensor(y_expanded,name='labels_all',dtype=tf.int32)
 
     data_len = tf.size(data)
     batch_len = data_len // batch_size
     data = tf.reshape(data[0 : batch_size * batch_len],
                       [batch_size, batch_len])
-    print(data.get_shape())
+    y_expanded = tf.reshape(y_expanded[0 : batch_size * batch_len],
+                      [batch_size, batch_len])
 
     epoch_size = (batch_len - 1) // num_steps
     assertion = tf.assert_positive(
@@ -281,15 +266,10 @@ def ptb_producer(raw_data, name=None):
     with tf.control_dependencies([assertion]):
       epoch_size = tf.identity(epoch_size, name="epoch_size")
     
-    print(raw_data.labels)
     # expand matrix of labels
-    print(data.get_shape())
-    y_expanded = [x[0]*np.ones(data.get_shape()[1]) for x in raw_data.labels]
-    print(len(y_expanded))
-    print(len(y_expanded)[0])
     i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
     x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
-    y = tf.slice(data, [0, i * num_steps + 1], [batch_size, num_steps])
+    y = tf.slice(y_expanded, [0, i * num_steps], [batch_size, num_steps])
     return x, y
 
 def batch_iter(context, questions, choices, choices_map, labels, vocab,
