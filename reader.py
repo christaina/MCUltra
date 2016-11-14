@@ -9,8 +9,38 @@ from string import punctuation
 import re
 import numpy as np
 import tensorflow as tf
+from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelEncoder
 
+def get_vocab(questions,context,min_frequency=500):
+    vocab_data = []
+    vocab_data.extend(questions)
+    vocab_data.extend(context)
+
+    max_length = max([len(row.split(" ")) for row in vocab_data])
+    """
+    vocab_pad = pad(vocab_data,max_length)
+    q_pad = pad(questions,max_length)
+    cont_pad = pad(context,max_length)
+    choices_pad = pad(choices,max_length)
+    labels_pad = pad(labels,max_length)
+    """
+
+    vocab_processor = learn.preprocessing.VocabularyProcessor(max_length,min_frequency=min_frequency) 
+    vocab_processor.fit(vocab_data)
+    print("done fitting vocab!")
+    return vocab_processor
+
+def mask_narrow(mat):
+    mask = np.all(mat == 0, axis=0)
+    return mat.T[~mask].T
+
+def fit_vocab(q,cont,choi,lab,vocab_processor):
+    q = vocab_processor.transform(q)
+    cont = vocab_processor.transform(cont)
+    choi = vocab_processor.transform(choi)
+    lab = vocab_processor.transform(lab)
+    return q,cont,choi,lab
 
 def clean_str(string, choice=False):
     """
@@ -65,20 +95,19 @@ def build_vocab(questions, encoded_context, word_cutoff=50000):
     count_pairs = count_pairs[:word_cutoff]
 
     words, _ = list(zip(*count_pairs))
-    word_to_id = dict(zip(words, range(len(words))))
-    word_to_id['<unk>']=max(word_to_id.values())+1
+    word_to_id = dict(zip(words, range(1,len(words)+1)))
     return word_to_id
 
 
 def _word_to_word_ids(words, word_to_id):
     data = []
-    for l in words:
+    for i,l in enumerate(words):
         data.append([word_to_id.get(word, max(word_to_id.values())+1) for word in l.split()])
     return data
 
 
 def pad(m, max_size):
-    new = 100000 * np.ones((len(m), max_size))
+    new = np.zeros((len(m), max_size))
     for sentence_ind, word_indices in enumerate(m):
         new[sentence_ind, :len(word_indices)] = word_indices
     return new
@@ -176,6 +205,16 @@ def load_data(data_path=None,cutoff=None):
                     new_choices[i],
                     labels[i], i)
         choices_map_all.append(choices_map)
+    """
+    rng = np.random.RandomState(0)
+    shuffle_indices = rng.permutation(np.arange(len(context)))
+    
+    questions = np.asarray(questions)[shuffle_indices]
+    context = np.asarray(context)[shuffle_indices]
+    new_choices = np.asarray(new_choices)[shuffle_indices]
+    choices_map_all = np.asarray(choices_map_all)[shuffle_indices]
+    labels = np.asarray(labels)[shuffle_indices]
+    """
     return context, questions, new_choices, labels,choices_map_all
 
 def map_to_vocab(mat,vocab,vocab_words):
@@ -192,6 +231,67 @@ def map_to_vocab(mat,vocab,vocab_words):
         enc_mat.append(line)
     return enc_mat
 
+def pad_data(data,vocabulary):
+  max_length = max([len(row.split(" ")) for row in data])
+  print("Padding..")
+  padded_data = pad(_word_to_word_ids(data,vocabulary),max_length)
+  return padded_data
+
+def ptb_producer(raw_data, name=None):
+  """Iterate on the raw PTB data.
+
+  This chunks up raw_data into batches of examples and returns Tensors that
+  are drawn from these batchesbb
+  Args:
+    raw_data: one of the raw data outputs from ptb_raw_data.
+    batch_size: int, the batch size.
+    num_steps: int, the number of unrolls.
+    name: the name of this operation (optional).
+
+  Returns:
+    A pair of Tensors, each shaped [batch_size, num_steps]. The second element
+    of the tuple is the same data time-shifted to the right by one.
+
+  Raises:
+    tf.errors.InvalidArgumentError: if batch_size or num_steps are too high.
+  """
+
+  rng = np.random.RandomState(0)
+
+  batch_size = raw_data.batch_size
+  num_steps = raw_data.num_steps
+  print("a")
+  print(len(raw_data.context))
+  print("b")
+  data = raw_data.context
+
+  with tf.name_scope(name, "PTBProducer", [raw_data, batch_size, num_steps]):
+    data = tf.convert_to_tensor(data, name="raw_data", dtype=tf.int32)
+
+    data_len = tf.size(data)
+    batch_len = data_len // batch_size
+    data = tf.reshape(data[0 : batch_size * batch_len],
+                      [batch_size, batch_len])
+    print(data.get_shape())
+
+    epoch_size = (batch_len - 1) // num_steps
+    assertion = tf.assert_positive(
+        epoch_size,
+        message="epoch_size == 0, decrease batch_size or num_steps")
+    with tf.control_dependencies([assertion]):
+      epoch_size = tf.identity(epoch_size, name="epoch_size")
+    
+    print(raw_data.labels)
+    # expand matrix of labels
+    print(data.get_shape())
+    y_expanded = [x[0]*np.ones(data.get_shape()[1]) for x in raw_data.labels]
+    print(len(y_expanded))
+    print(len(y_expanded)[0])
+    i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
+    x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
+    y = tf.slice(data, [0, i * num_steps + 1], [batch_size, num_steps])
+    return x, y
+
 def batch_iter(context, questions, choices, choices_map, labels, vocab,
                batch_size=32, num_epochs=5, random_state=0):
     """
@@ -203,20 +303,13 @@ def batch_iter(context, questions, choices, choices_map, labels, vocab,
     data_indices = np.arange(data_size)
     num_batches_per_epoch = int(data_size / batch_size) + 1
 
-    max_con_len = max([len(cont.split(" ")) for cont in context])
-    max_qs_len = max([len(question.split(" ")) for question in questions])
-
-    vocab_words = set(vocab.keys())
-
+    """
     questions = np.asarray(questions)
     context = np.asarray(context)
     choices_map = np.asarray(choices_map)
     choices = np.asarray(choices)
-    print(len(choices_map))
-    print(len(choices))
-
     labels = np.asarray(labels)
-    
+    """
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
         shuffle_indices = rng.permutation(data_indices)
@@ -229,20 +322,19 @@ def batch_iter(context, questions, choices, choices_map, labels, vocab,
         for batch_num in range(num_batches_per_epoch):
             start_index = batch_num * batch_size
             end_index = min((batch_num + 1) * batch_size, data_size)
-            
+            """
             padded_qs = pad(
                 _word_to_word_ids(shuffled_qs[start_index:end_index], vocab),
                 max_qs_len)
             padded_cont = pad(
                 _word_to_word_ids(shuffled_cont[start_index:end_index], vocab),
                 max_con_len)
-
             mapped_choices = []
             for i,li in enumerate(shuffled_choices[start_index:end_index]):
                 mapped_choices.append([vocab[x] for x in li])
-            
+            """ 
             yield (
-                padded_qs.astype(int), padded_cont.astype(int),\
-                        mapped_choices,
-                _word_to_word_ids(shuffled_labels[start_index: end_index],vocab)
-            ,choices_map )
+                shuffled_qs, shuffled_cont,\
+                        shuffled_choices,
+                shuffled_labels,
+             shuffled_map )
