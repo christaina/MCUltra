@@ -12,7 +12,7 @@ import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelEncoder
 
-def get_vocab(questions,context,min_frequency=500):
+def get_vocab(questions, context, min_frequency=500):
     vocab_data = []
     vocab_data.extend(questions)
     vocab_data.extend(context)
@@ -26,7 +26,7 @@ def get_vocab(questions,context,min_frequency=500):
     labels_pad = pad(labels,max_length)
     """
 
-    vocab_processor = learn.preprocessing.VocabularyProcessor(max_length,min_frequency=min_frequency) 
+    vocab_processor = learn.preprocessing.VocabularyProcessor(max_length,min_frequency=min_frequency)
     vocab_processor.fit(vocab_data)
     print("done fitting vocab!")
     return vocab_processor
@@ -211,7 +211,7 @@ def load_data(data_path=None,cutoff=None):
     """
     rng = np.random.RandomState(0)
     shuffle_indices = rng.permutation(np.arange(len(context)))
-    
+
     questions = np.asarray(questions)[shuffle_indices]
     context = np.asarray(context)[shuffle_indices]
     new_choices = np.asarray(new_choices)[shuffle_indices]
@@ -245,7 +245,7 @@ def ptb_producer(context,questions,choices,labels,\
 
   rng = np.random.RandomState(0)
 
-  data = context 
+  data = context
 
   with tf.name_scope(name, "PTBProducer", [data, batch_size, num_steps]):
     data = tf.convert_to_tensor(data, name="raw_data", dtype=tf.int32)
@@ -265,7 +265,7 @@ def ptb_producer(context,questions,choices,labels,\
         message="epoch_size == 0, decrease batch_size or num_steps")
     with tf.control_dependencies([assertion]):
       epoch_size = tf.identity(epoch_size, name="epoch_size")
-    
+
     # expand matrix of labels
     i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
     x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
@@ -281,15 +281,8 @@ def batch_iter(context, questions, choices, choices_map, labels, vocab,
 
     data_size = len(context)
     data_indices = np.arange(data_size)
-    num_batches_per_epoch = int(data_size / batch_size) + 1
+    num_batches_per_epoch = int(data_size / batch_size)
 
-    """
-    questions = np.asarray(questions)
-    context = np.asarray(context)
-    choices_map = np.asarray(choices_map)
-    choices = np.asarray(choices)
-    labels = np.asarray(labels)
-    """
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
         shuffle_indices = rng.permutation(data_indices)
@@ -301,20 +294,10 @@ def batch_iter(context, questions, choices, choices_map, labels, vocab,
 
         for batch_num in range(num_batches_per_epoch):
             start_index = batch_num * batch_size
-            end_index = min((batch_num + 1) * batch_size, data_size)
-            """
-            padded_qs = pad(
-                _word_to_word_ids(shuffled_qs[start_index:end_index], vocab),
-                max_qs_len)
-            padded_cont = pad(
-                _word_to_word_ids(shuffled_cont[start_index:end_index], vocab),
-                max_con_len)
-            mapped_choices = []
-            for i,li in enumerate(shuffled_choices[start_index:end_index]):
-                mapped_choices.append([vocab[x] for x in li])
-            """ 
+            end_index = start_index + batch_size
             yield (
-                shuffled_qs, shuffled_cont,\
-                        shuffled_choices,
-                shuffled_labels,
-             shuffled_map )
+                shuffled_qs[start_index: end_index],
+                shuffled_cont[start_index: end_index],
+                shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index],
+                shuffled_map[start_index: end_index])
