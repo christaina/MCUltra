@@ -225,6 +225,13 @@ def ptb_producer(context,questions,choices,labels,\
     return x, y
 
 
+def get_seq_length(mat):
+    """
+    get true sequence lengths for input into model
+    """
+    zero_mask = ~np.ma.masked_where(mat==0,mat).mask
+    return sum(zero_mask.T)
+
 def batch_iter(data_path,
                batch_size=32, num_epochs=5, random_state=0,
                context_num_steps=20,
@@ -243,6 +250,9 @@ def batch_iter(data_path,
     if not vocabulary:
         vocabulary = get_vocab(raw_questions, raw_context, min_frequency=10)
 
+    raw_choices = np.array([" ".join(x) for x in raw_choices])
+    raw_labels = np.array(raw_labels)
+    choices_map = np.array(choices_map)
     questions = vocab_transform(raw_questions, vocabulary)
     context = vocab_transform(raw_context, vocabulary)
     data_size = len(context)
@@ -250,9 +260,9 @@ def batch_iter(data_path,
     num_batches_per_epoch = int(data_size / batch_size)
 
     cont_len = context.shape[1]
-    cont_lim = (cont_len // cont_num_steps) * cont_num_steps
+    cont_lim = (cont_len // context_num_steps) * context_num_steps
     qs_len = questions.shape[1]
-    qs_lim = (qs_len // qs_num_steps) * qs_num_steps
+    qs_lim = (qs_len // question_num_steps) * question_num_steps
 
     for epoch in range(num_epochs):
         # Shuffle the data at each epoch
@@ -269,13 +279,13 @@ def batch_iter(data_path,
             curr_qs_batch = shuffled_qs[start_index: end_index]
             curr_cont_batch = shuffled_cont[start_index: end_index]
 
-            cont_batches = [curr_cont_batch[:, start_ind: start_ind + cont_num_steps]
-                            for start_ind in range(0, cont_lim, cont_num_steps)]
-            qs_batches = [curr_qs_batch[:, start_ind: start_ind + qs_num_steps]
-                            for start_ind in range(0, qs_lim, qs_num_steps)]
+            cont_batches = [curr_cont_batch[:, start_ind: start_ind + context_num_steps]
+                            for start_ind in range(0, cont_lim, context_num_steps)]
+            qs_batches = [curr_qs_batch[:, start_ind: start_ind + question_num_steps]
+                            for start_ind in range(0, qs_lim, question_num_steps)]
             yield (
                 qs_batches,
                 cont_batches,
                 shuffled_choices[start_index: end_index],
                 shuffled_labels[start_index: end_index],
-                shuffled_map[start_index: end_index])
+                shuffled_map[start_index: end_index],all_choices,vocabulary)
