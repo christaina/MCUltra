@@ -129,7 +129,7 @@ class GenInput(object):
         self.vocabulary=vocabulary
 
     raw_choices = [" ".join(x) for x in raw_choices]
-    self.all_choices = read.vocab_transform(all_choices,self.vocabulary)
+    self.all_choices = read.vocab_transform(all_choices,self.vocabulary) 
     self.questions = read.vocab_transform(raw_questions,self.vocabulary)
     self.context = read.vocab_transform(raw_context,self.vocabulary)
     self.labels = read.vocab_transform(raw_labels,self.vocabulary)
@@ -156,7 +156,7 @@ class PTBModel(object):
     # Slightly better results can be obtained with forget gate biases
     # initialized to 1 but the hyperparameters of the model would need to be
     # different than reported in the paper.
-
+    
     lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0, state_is_tuple=False)
     lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0, state_is_tuple=False)
     if is_training and config.keep_prob < 1:
@@ -186,8 +186,9 @@ class PTBModel(object):
                     lstm_bw_cell,\
                     inputs, \
                     initial_state_fw=self._initial_state[0],\
-                    initial_state_bw=self._initial_state[1])
-
+                    initial_state_bw=self._initial_state[1],\
+                    sequence_length=self.sequence_lengths)
+    
     print("Recieved output tensor %s long"%len(outputs))
     print("Each element has shape %s"%outputs[0].get_shape())
     concat_outputs = tf.concat(1,outputs)
@@ -200,19 +201,26 @@ class PTBModel(object):
     softmax_b = tf.get_variable("softmax_b", [choices_size], dtype=data_type())
     print("Softmax shape:%s,%s"%(softmax_w.get_shape(),softmax_b.get_shape()))
     logits = tf.matmul(output, softmax_w) + softmax_b
+    self._logits = tf.reshape(logits,[self.batch_size,-1,2,choices_size])
+    self._logits = tf.reduce_max(self.logits,reduction_indices=2)
+    logits = tf.reshape(self._logits,[-1,choices_size])
+    self._predictions = tf.argmax(self._logits,2)
     print("Logits shape : %s"%logits.get_shape())
 
     print("original y shape: %s"%self.input_y.get_shape())
     y_ext = tf.expand_dims(self.input_y,2)
     y_doubles = tf.concat(2,[y_ext,y_ext])
     print("new y shape: %s"%y_doubles.get_shape())
-    y_grp = tf.reshape(y_doubles,[self.batch_size,-1])
-    loss_weights = tf.ones([self.batch_size * self.num_steps * 2],dtype=data_type())
+    y_grp = tf.reshape(y_ext,[self.batch_size,-1]) 
+    loss_weights = tf.ones([self.batch_size * self.num_steps ],dtype=data_type())
     print("y shape: %s"%y_grp.get_shape())
+    print("loss shape: %s"%loss_weights.get_shape())
     loss = tf.nn.seq2seq.sequence_loss_by_example(
         [logits],
         [y_grp],
         [loss_weights])
+    #correct_preds = tf.equal(self._predictions,self.input_y)
+    #self.acc = tf.reduce_mean(tf.cast(correct_preds,"float"))
     self._cost = cost = tf.reduce_sum(loss) / self.batch_size
     self._final_state = (state_fw,state_bw)
 
@@ -244,9 +252,20 @@ class PTBModel(object):
     return self._initial_state
 
   @property
+  def predictions(self):
+    return self._predictions
+
+  @property
+  def logits(self):
+    return self._logits
+
+  @property
   def cost(self):
     return self._cost
 
+  @property
+  def targets(self):
+    return self.input_y
   @property
   def final_state(self):
     return self._final_state
@@ -327,11 +346,11 @@ class TestConfig(object):
 def run_epoch(session, model, input, eval_op=None, verbose=False):
   """Runs the model on the given data."""
   start_time = time.time()
-  for j, batch in enumerate(input):
+  for j,batch in enumerate(input):
 
-    questions, context, choices, labels, map, all_choices, vocabulary = batch
+    questions,context,choices,labels,map,all_choices,vocabulary = batch
     m_vocab_size = str(len(vocabulary.vocabulary_))
-    print("vocab_size %s" % m_vocab_size)
+    print("vocab_size %s"%m_vocab_size)
     mapped_labels = ([all_choices[x] for x in labels])
 
     costs = 0.0
@@ -341,6 +360,9 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
     fetches = {
       "cost": model.cost,
       "final_state": model.final_state,
+      "predictions":model.predictions,
+      "logits":model.logits,
+      "targets":model.targets
     }
     if eval_op is not None:
         fetches["eval_op"] = eval_op
@@ -348,8 +370,6 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
     for i,step in enumerate(context):
         print("step %s, batch %s"%(i,j))
         feed_dict = {}
-    #input_x = input.input_data.eval(session=session)
-    #input_y = input.input_data.eval(session=session)
         feed_dict[model.initial_state] = state
         feed_dict[model.input_x]=step
         reshape_labels = np.array([x*np.ones(len(step[1])) for x in mapped_labels])
@@ -359,7 +379,14 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
         vals = session.run(fetches, feed_dict)
         cost = vals["cost"]
         state = vals["final_state"]
-
+        if i==0:
+            print(vals["targets"])
+            print(step)
+            print(rn.get_seq_length(step))
+            print(vals["predictions"])
+            print(vals["logits"])
+            print(reshape_labels)
+            print(vals["logits"].shape)
         costs += cost
         iters += model.num_steps
         """
@@ -367,7 +394,7 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
         print("%.3f perplexity: %.3f speed: %.0f wps" %
             (step * 1.0 / model.epoch_size, np.exp(costs / iters),
              iters * model.batch_size / (time.time() - start_time)))
-        """
+        """ 
   return np.exp(costs / iters)
 
 
@@ -388,7 +415,7 @@ def main(_):
   if not FLAGS.data_path:
     raise ValueError("Must set --data_path to PTB data directory")
 
-  train_path = os.path.join(FLAGS.data_wdw, 'test')
+  train_path = os.path.join(FLAGS.data_wdw,'test')
   #raw_data = reader.ptb_raw_data(FLAGS.data_path)
   #train_data, valid_data, test_data, _ = raw_data
 
@@ -399,9 +426,8 @@ def main(_):
   print("Loading WDW Data..")
   #train_data_wdw = GenInput(config,data_path=train_path)
   print("loading iter data..")
-  train_data_wdw_iter = rn.batch_iter(
-      train_path, batch_size=config.batch_size,
-      num_epochs=config.max_epoch, context_num_steps=config.num_steps)
+  train_data_wdw_iter = rn.batch_iter(train_path,batch_size=config.batch_size,
+          num_epochs=config.max_epoch,context_num_steps=config.num_steps)
 
   with tf.Graph().as_default():
     initializer = tf.random_uniform_initializer(-config.init_scale,
@@ -433,8 +459,7 @@ def main(_):
         m.assign_lr(session, config.learning_rate * lr_decay)
 
         print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-        train_perplexity = run_epoch(session, m, train_data_wdw_iter,
-                                     eval_op=m.train_op,
+        train_perplexity = run_epoch(session, m, train_data_wdw_iter,eval_op=m.train_op,
                                      verbose=True)
         print("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
         """
