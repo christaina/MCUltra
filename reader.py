@@ -132,6 +132,7 @@ def encode_choices(context, question, choices, label, i):
     new_choices = [choices_map[x] for x in choices]
     return context, question, new_choices,label,choices_map
 
+
 def load_data(data_path=None, cutoff=None):
     """
     Return a tuple of a
@@ -177,7 +178,7 @@ def load_data(data_path=None, cutoff=None):
         new_choices.append(longest_first)
 
     data_size = len(context)
-    labels = [clean_str(l) for l in open(lab_p).read().strip().split("\n")]
+    labels = strip_punctuation(open(lab_p).readlines())
 
     for i in range(data_size):
         context[i], questions[i], new_choices[i], labels[i], choices_map = \
@@ -192,45 +193,13 @@ def load_data(data_path=None, cutoff=None):
         context, questions, new_choices, labels, choices_map_all)
 
 
-def ptb_producer(context,questions,choices,labels,\
-        name=None,num_steps=20,batch_size=20):
-
-  rng = np.random.RandomState(0)
-
-  data = context
-
-  with tf.name_scope(name, "PTBProducer", [data, batch_size, num_steps]):
-    data = tf.convert_to_tensor(data, name="raw_data", dtype=tf.int32)
-    y_expanded = np.array([x[0]*np.ones(data.get_shape()[1]) for x in labels])
-    y_expanded = tf.convert_to_tensor(y_expanded,name='labels_all',dtype=tf.int32)
-
-    data_len = tf.size(data)
-    batch_len = data_len // batch_size
-    data = tf.reshape(data[0 : batch_size * batch_len],
-                      [batch_size, batch_len])
-    y_expanded = tf.reshape(y_expanded[0 : batch_size * batch_len],
-                      [batch_size, batch_len])
-
-    epoch_size = (batch_len - 1) // num_steps
-    assertion = tf.assert_positive(
-        epoch_size,
-        message="epoch_size == 0, decrease batch_size or num_steps")
-    with tf.control_dependencies([assertion]):
-      epoch_size = tf.identity(epoch_size, name="epoch_size")
-
-    # expand matrix of labels
-    i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
-    x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
-    y = tf.slice(y_expanded, [0, i * num_steps], [batch_size, num_steps])
-    return x, y
-
-
 def get_seq_length(mat):
     """
     get true sequence lengths for input into model
     """
     zero_mask = ~np.ma.masked_where(mat==0,mat).mask
     return sum(zero_mask.T)
+
 
 def batch_iter(data_path,
                batch_size=32, num_epochs=5, random_state=0,
@@ -288,4 +257,6 @@ def batch_iter(data_path,
                 cont_batches,
                 shuffled_choices[start_index: end_index],
                 shuffled_labels[start_index: end_index],
-                shuffled_map[start_index: end_index],all_choices,vocabulary)
+                shuffled_map[start_index: end_index],
+                all_choices,
+                vocabulary)

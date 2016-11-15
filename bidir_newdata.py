@@ -129,7 +129,7 @@ class GenInput(object):
         self.vocabulary=vocabulary
 
     raw_choices = [" ".join(x) for x in raw_choices]
-    self.all_choices = read.vocab_transform(all_choices,self.vocabulary) 
+    self.all_choices = read.vocab_transform(all_choices,self.vocabulary)
     self.questions = read.vocab_transform(raw_questions,self.vocabulary)
     self.context = read.vocab_transform(raw_context,self.vocabulary)
     self.labels = read.vocab_transform(raw_labels,self.vocabulary)
@@ -156,7 +156,7 @@ class PTBModel(object):
     # Slightly better results can be obtained with forget gate biases
     # initialized to 1 but the hyperparameters of the model would need to be
     # different than reported in the paper.
-    
+
     lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0, state_is_tuple=False)
     lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0, state_is_tuple=False)
     if is_training and config.keep_prob < 1:
@@ -187,7 +187,7 @@ class PTBModel(object):
                     inputs, \
                     initial_state_fw=self._initial_state[0],\
                     initial_state_bw=self._initial_state[1])
-    
+
     print("Recieved output tensor %s long"%len(outputs))
     print("Each element has shape %s"%outputs[0].get_shape())
     concat_outputs = tf.concat(1,outputs)
@@ -206,7 +206,7 @@ class PTBModel(object):
     y_ext = tf.expand_dims(self.input_y,2)
     y_doubles = tf.concat(2,[y_ext,y_ext])
     print("new y shape: %s"%y_doubles.get_shape())
-    y_grp = tf.reshape(y_doubles,[self.batch_size,-1]) 
+    y_grp = tf.reshape(y_doubles,[self.batch_size,-1])
     loss_weights = tf.ones([self.batch_size * self.num_steps * 2],dtype=data_type())
     print("y shape: %s"%y_grp.get_shape())
     loss = tf.nn.seq2seq.sequence_loss_by_example(
@@ -327,11 +327,11 @@ class TestConfig(object):
 def run_epoch(session, model, input, eval_op=None, verbose=False):
   """Runs the model on the given data."""
   start_time = time.time()
-  for j,batch in enumerate(input):
+  for j, batch in enumerate(input):
 
-    questions,context,choices,labels,map,all_choices,vocabulary = batch
+    questions, context, choices, labels, map, all_choices, vocabulary = batch
     m_vocab_size = str(len(vocabulary.vocabulary_))
-    print("vocab_size %s"%m_vocab_size)
+    print("vocab_size %s" % m_vocab_size)
     mapped_labels = ([all_choices[x] for x in labels])
 
     costs = 0.0
@@ -367,7 +367,7 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
         print("%.3f perplexity: %.3f speed: %.0f wps" %
             (step * 1.0 / model.epoch_size, np.exp(costs / iters),
              iters * model.batch_size / (time.time() - start_time)))
-        """ 
+        """
   return np.exp(costs / iters)
 
 
@@ -388,7 +388,7 @@ def main(_):
   if not FLAGS.data_path:
     raise ValueError("Must set --data_path to PTB data directory")
 
-  train_path = os.path.join(FLAGS.data_wdw,'test')
+  train_path = os.path.join(FLAGS.data_wdw, 'test')
   #raw_data = reader.ptb_raw_data(FLAGS.data_path)
   #train_data, valid_data, test_data, _ = raw_data
 
@@ -399,8 +399,9 @@ def main(_):
   print("Loading WDW Data..")
   #train_data_wdw = GenInput(config,data_path=train_path)
   print("loading iter data..")
-  train_data_wdw_iter = rn.batch_iter(train_path,batch_size=config.batch_size,
-          num_epochs=config.max_epoch,context_num_steps=config.num_steps)
+  train_data_wdw_iter = rn.batch_iter(
+      train_path, batch_size=config.batch_size,
+      num_epochs=config.max_epoch, context_num_steps=config.num_steps)
 
   with tf.Graph().as_default():
     initializer = tf.random_uniform_initializer(-config.init_scale,
@@ -432,7 +433,8 @@ def main(_):
         m.assign_lr(session, config.learning_rate * lr_decay)
 
         print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-        train_perplexity = run_epoch(session, m, train_data_wdw_iter,eval_op=m.train_op,
+        train_perplexity = run_epoch(session, m, train_data_wdw_iter,
+                                     eval_op=m.train_op,
                                      verbose=True)
         print("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
         """
