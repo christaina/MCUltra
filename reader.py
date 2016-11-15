@@ -28,10 +28,10 @@ def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
     return mat.T[~mask].T
 
-def vocab_transform(mat,vocab):
+def vocab_transform(mat, vocab):
     return mask_narrow(np.array(list(vocab.transform(mat))))
 
-def fit_vocab(q,cont,choi,lab,vocab_processor):
+def fit_vocab(q, cont, choi, lab, vocab_processor):
     q = vocab_processor.transform(q)
     cont = vocab_processor.transform(cont)
     choi = vocab_processor.transform(choi)
@@ -77,33 +77,21 @@ def build_choices(choices):
     return choice_to_id
 
 
-def build_vocab(questions, encoded_context, word_cutoff=50000):
+def strip_punctuation(lines, return_len=False):
     """
-    Builds vocabulary and returns dict mapping words to ids
-    """
-    data = [questions, encoded_context]
-    all_words = [token for sublist in data for item in sublist for token in item.split()]
-
-    counter = collections.Counter(all_words)
-    count_pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
-
-    # Get top-50000 words
-    count_pairs = count_pairs[:word_cutoff]
-
-    words, _ = list(zip(*count_pairs))
-    word_to_id = dict(zip(words, range(1,len(words)+1)))
-    return word_to_id
-
-
-def strip_punctuation(lines):
-    """
-    Strip punctuation from a list of lines
+    Strip punctuation from a list of lines and optionally return the lengths.
     """
     stripped_lines = []
+    if return_len:
+        lengths = []
+
     for line in lines:
-        stripped_lines.append(
-            ' '.join([token for token in clean_str(line).split(' ') if token not in punctuation])
-        )
+        tokens = [token for token in clean_str(line).split(' ') if token not in punctuation]
+        stripped_lines.append(' '.join(tokens))
+        if return_len:
+            lengths.append(len(tokens))
+    if return_len:
+        return stripped_lines, np.array(lengths)
     return stripped_lines
 
 
@@ -154,11 +142,13 @@ def load_data(data_path=None, cutoff=None):
     lab_p = os.path.join(data_path, labels_fn)
 
     questions_file = open(qu_p, "r")
-    questions = strip_punctuation(questions_file.readlines())
+    questions, qs_lens = strip_punctuation(
+        questions_file.readlines(), return_len=True)
     questions_file.close()
 
     context_file = open(cont_p, "r")
-    context = strip_punctuation(context_file.readlines())
+    context, context_lens = strip_punctuation(
+        context_file.readlines(), return_len=True)
     context_file.close()
 
     choices_file = open(ch_p, "r")
@@ -190,19 +180,20 @@ def load_data(data_path=None, cutoff=None):
         choices_map_all.append(choices_map)
 
     return (
-        context, questions, new_choices, labels, choices_map_all)
+        context, questions, new_choices, labels, choices_map_all,
+        context_lens, qs_lens)
 
 
 def get_seq_length(mat):
     """
     get true sequence lengths for input into model
     """
-    zero_mask = ~np.ma.masked_where(mat==0,mat).mask
+    zero_mask = ~np.ma.masked_where(mat==0, mat).mask
     return sum(zero_mask.T)
 
 
 def batch_iter(data_path,
-               batch_size=32, num_epochs=5, random_state=0,
+               batch_size=32, num_epochs=5, random_state=None,
                context_num_steps=20,
                question_num_steps=20,
                vocabulary=None):
@@ -211,8 +202,8 @@ def batch_iter(data_path,
     """
     rng = np.random.RandomState(random_state)
 
-    raw_context, raw_questions, raw_choices, raw_labels, choices_map = \
-        load_data(data_path)
+    raw_context, raw_questions, raw_choices, raw_labels, choices_map, \
+    context_lens, qs_lens = load_data(data_path)
     all_choices = build_choices(raw_choices)
 
     # build vocab for train data
@@ -241,6 +232,8 @@ def batch_iter(data_path,
         shuffled_choices = raw_choices[shuffle_indices]
         shuffled_map = choices_map[shuffle_indices]
         shuffled_labels = raw_labels[shuffle_indices]
+        shuf_cont_lens = context_lens[shuffle_indices]
+        shuf_qs_lens = qs_lens[shuffle_indices]
 
         for batch_num in range(num_batches_per_epoch):
             start_index = batch_num * batch_size
@@ -259,4 +252,6 @@ def batch_iter(data_path,
                 shuffled_labels[start_index: end_index],
                 shuffled_map[start_index: end_index],
                 all_choices,
-                vocabulary)
+                vocabulary,
+                shuf_cont_lens[start_index: end_index],
+                shuf_qs_lens[start_index: end_index])
