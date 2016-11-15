@@ -12,6 +12,7 @@ import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelEncoder
 
+
 def get_vocab(questions, context, min_frequency=500):
     vocab_data = []
     vocab_data.extend(questions)
@@ -24,19 +25,23 @@ def get_vocab(questions, context, min_frequency=500):
     print("done fitting vocab!")
     return vocab_processor
 
+
 def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
     return mat.T[~mask].T
 
+
 def vocab_transform(mat, vocab):
     return mask_narrow(np.array(list(vocab.transform(mat))))
+
 
 def fit_vocab(q, cont, choi, lab, vocab_processor):
     q = vocab_processor.transform(q)
     cont = vocab_processor.transform(cont)
     choi = vocab_processor.transform(choi)
     lab = vocab_processor.transform(lab)
-    return q,cont,choi,lab
+    return q, cont, choi, lab
+
 
 def clean_str(string, choice=False):
     """
@@ -68,6 +73,7 @@ def _read_words(filename):
     with tf.gfile.GFile(filename, "r") as f:
         fi = f.read().decode("utf-8").strip().split("\n")
     return [re.split('[$$$\s]', x) for x in fi]
+
 
 def build_choices(choices):
     all_choices = [item for sublist in choices for item in sublist]
@@ -192,29 +198,23 @@ def get_seq_length(mat):
     return sum(zero_mask.T)
 
 
-def batch_iter(data_path,
-               batch_size=32, num_epochs=5, random_state=None,
-               context_num_steps=20,
-               question_num_steps=20,
-               vocabulary=None):
+def batch_iter(contexts, questions, choices, labels, choices_map,
+               context_lens, qs_lens, batch_size=32, num_epochs=5,
+               random_state=None, context_num_steps=20,
+               question_num_steps=20, vocabulary=None):
     """
     Generates a batch iterator for a dataset.
     """
     rng = np.random.RandomState(random_state)
-
-    raw_context, raw_questions, raw_choices, raw_labels, choices_map, \
-    context_lens, qs_lens = load_data(data_path)
-    all_choices = build_choices(raw_choices)
-
     # build vocab for train data
     if not vocabulary:
-        vocabulary = get_vocab(raw_questions, raw_context, min_frequency=10)
+        vocabulary = get_vocab(questions, contexts, min_frequency=10)
 
-    raw_choices = np.array([" ".join(x) for x in raw_choices])
-    raw_labels = np.array(raw_labels)
+    choices = np.array([" ".join(x) for x in choices])
+    labels = np.array(labels)
     choices_map = np.array(choices_map)
-    questions = vocab_transform(raw_questions, vocabulary)
-    context = vocab_transform(raw_context, vocabulary)
+    questions = vocab_transform(questions, vocabulary)
+    context = vocab_transform(contexts, vocabulary)
     data_size = len(context)
     data_indices = np.arange(data_size)
     num_batches_per_epoch = int(data_size / batch_size)
@@ -229,9 +229,9 @@ def batch_iter(data_path,
         shuffle_indices = rng.permutation(data_indices)
         shuffled_qs = questions[shuffle_indices]
         shuffled_cont = context[shuffle_indices]
-        shuffled_choices = raw_choices[shuffle_indices]
+        shuffled_choices = choices[shuffle_indices]
         shuffled_map = choices_map[shuffle_indices]
-        shuffled_labels = raw_labels[shuffle_indices]
+        shuffled_labels = labels[shuffle_indices]
         shuf_cont_lens = context_lens[shuffle_indices]
         shuf_qs_lens = qs_lens[shuffle_indices]
 
@@ -251,7 +251,5 @@ def batch_iter(data_path,
                 shuffled_choices[start_index: end_index],
                 shuffled_labels[start_index: end_index],
                 shuffled_map[start_index: end_index],
-                all_choices,
-                vocabulary,
                 shuf_cont_lens[start_index: end_index],
                 shuf_qs_lens[start_index: end_index])
