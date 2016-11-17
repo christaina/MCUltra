@@ -33,13 +33,14 @@ def data_type():
   return tf.float16 if FLAGS.use_fp16 else tf.float32
 
 class RawInput(object):
-    def __init__(self,data_bundle):
-        self.contexts,self.questions,\
-                self.choices,self.labels,\
-                self.choices_map,self.context_lens,self.qs_lens,\
-                self.vocab = data_bundle
+    def __init__(self, data_bundle):
+        (self.contexts, self.questions, self.choices, self.labels,
+            self.choices_map, self.context_lens, self.qs_lens) = data_bundle
+        self.vocab = rn.get_vocab(
+            self.questions, self.contexts, min_frequency=10)
         self.vocab_size = len(self.vocab.vocabulary_)
-        self.labels_idx =list(set([choice for choices in self.choices for choice in choices]))
+        self.labels_idx = list(set([choice for choices in self.choices for choice in choices]))
+
 
 class BiLSTM(object):
     """
@@ -77,7 +78,7 @@ class BiLSTM(object):
                         initial_state_fw=self._initial_state[0],\
                         initial_state_bw=self._initial_state[1],\
                         sequence_length=self.sequence_lengths,scope="BiRNN_%s"%name)
-        
+
 
 
 class PTBModel(object):
@@ -88,11 +89,11 @@ class PTBModel(object):
 
     print("input data shape:")
     self.num_steps =context_steps
-    choices_size = len(labels_idx) 
+    choices_size = len(labels_idx)
     self.labels_idx = labels_idx
     self.batch_size = config.batch_size
     self.size = config.hidden_size
-    self.vocab_size = vocab_size 
+    self.vocab_size = vocab_size
     self.context_steps = context_steps
     self.question_steps = question_steps
 
@@ -102,12 +103,12 @@ class PTBModel(object):
     with tf.device("/cpu:0"):
       embedding = tf.get_variable(
           "embedding", [self.vocab_size, self.size], dtype=data_type())
-    
+
     # bidirectional lstm
     qlstm = BiLSTM(self.input_x,self.sequence_lengths,\
             is_training,config,context_steps,embedding,name='question')
     self._initial_state = qlstm._initial_state
-    
+
     concat_outputs = qlstm.outputs[-1]
     state_fw = qlstm.state_fw
     state_bw = qlstm.state_bw
@@ -128,7 +129,7 @@ class PTBModel(object):
     y_ext = tf.expand_dims(self.input_y,2)
     y_doubles = tf.concat(2,[y_ext,y_ext])
     print("new y shape: %s"%y_doubles.get_shape())
-    y_grp = tf.reshape(y_ext,[self.batch_size,-1]) 
+    y_grp = tf.reshape(y_ext,[self.batch_size,-1])
     y_grp = tf.reduce_max(y_grp,reduction_indices=1)
     loss_weights = tf.ones([self.batch_size ],dtype=data_type())
     print("y shape: %s"%y_grp.get_shape())
@@ -259,19 +260,19 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
     for i,step in enumerate(context):
         feed_dict = {}
         feed_dict[model.initial_state] = state
-        feed_dict[model.input_x]=step
+        feed_dict[model.input_x] = step
         reshape_labels = np.array([x*np.ones(len(step[1])) for x in mapped_labels])
         feed_dict[model.input_y]=reshape_labels
         #feed_dict[model.sequence_lengths] = context_lens
         seq_len = rn.get_seq_length(step)
-        feed_dict[model.sequence_lengths] = seq_len 
+        feed_dict[model.sequence_lengths] = seq_len
 
         vals = session.run(fetches, feed_dict)
         cost = vals["cost"]
         state = vals["final_state"]
         if i==0:
             print("batch %s; accuracy: %s"%(j,vals["acc"]))
-           
+
             print("predictions: %s"%vals["predictions"].T)
 
 def get_config():
@@ -289,9 +290,9 @@ def get_config():
 
 def main(_):
 
-  train_path = os.path.join(FLAGS.data_wdw,'test')
-  val_path = os.path.join(FLAGS.data_wdw,'val')
-  test_path = os.path.join(FLAGS.data_wdw,'test')
+  train_path = os.path.join(FLAGS.data_wdw, 'test')
+  val_path = os.path.join(FLAGS.data_wdw, 'val')
+  test_path = os.path.join(FLAGS.data_wdw, 'test')
 
   config = get_config()
   eval_config = get_config()
@@ -303,13 +304,15 @@ def main(_):
   config.num_steps = c_steps
 
   print("Loading WDW Data..")
-  train = RawInput(rn.load_data(train_path,vocabulary=None)) 
+  train = RawInput(rn.load_data(train_path))
+
   print("loading iter data..")
-  train_iter = rn.batch_iter(train.contexts,train.questions,train.choices,\
-          train.labels, train.choices_map, train.context_lens,\
-          train.qs_lens,batch_size=config.batch_size,
-          num_epochs=config.max_epoch,context_num_steps=c_steps,\
-                  question_num_steps = q_steps)
+  train_iter = rn.batch_iter(
+      train.contexts, train.questions,
+      train.choices, train.labels, train.choices_map, train.context_lens,
+      train.qs_lens,batch_size=config.batch_size,
+      num_epochs=config.max_epoch, context_num_steps=c_steps,
+      question_num_steps=q_steps)
 
   with tf.Graph().as_default():
     initializer = tf.random_uniform_initializer(-config.init_scale,

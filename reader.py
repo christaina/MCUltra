@@ -127,7 +127,7 @@ def encode_choices(context, question, choices, label, i):
     return context, question, new_choices,label,choices_map
 
 
-def load_data(data_path=None, cutoff=None):
+def load_data(data_path=None):
     """
     Return a tuple of a
 
