@@ -82,82 +82,81 @@ class BiLSTM(object):
 
 
 class PTBModel(object):
-  """The PTB model."""
+    """The PTB model."""
 
-  def __init__(self, is_training, config,vocab_size,\
-          labels_idx,context_steps,question_steps):
+    def __init__(self, is_training, config, vocab_size, labels_idx, context_steps,question_steps):
 
-    print("input data shape:")
-    self.num_steps =context_steps
-    choices_size = len(labels_idx)
-    self.labels_idx = labels_idx
-    self.batch_size = config.batch_size
-    self.size = config.hidden_size
-    self.vocab_size = vocab_size
-    self.context_steps = context_steps
-    self.question_steps = question_steps
+        print("input data shape:")
+        self.num_steps =context_steps
+        choices_size = len(labels_idx)
+        self.labels_idx = labels_idx
+        self.batch_size = config.batch_size
+        self.size = config.hidden_size
+        self.vocab_size = vocab_size
+        self.context_steps = context_steps
+        self.question_steps = question_steps
 
-    self.input_x = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
-    self.input_y = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
-    self.sequence_lengths = tf.placeholder(tf.int32,[self.batch_size])
-    with tf.device("/cpu:0"):
-      embedding = tf.get_variable(
-          "embedding", [self.vocab_size, self.size], dtype=data_type())
+        self.input_x = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
+        self.input_y = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
+        self.sequence_lengths = tf.placeholder(tf.int32, [self.batch_size])
+        with tf.device("/cpu:0"):
+          embedding = tf.get_variable(
+              "embedding", [self.vocab_size, self.size], dtype=data_type())
 
-    # bidirectional lstm
-    qlstm = BiLSTM(self.input_x,self.sequence_lengths,\
-            is_training,config,context_steps,embedding,name='question')
-    self._initial_state = qlstm._initial_state
+        # bidirectional lstm
+        qlstm = BiLSTM(self.input_x,self.sequence_lengths,\
+                is_training,config,context_steps,embedding,name='question')
+        self._initial_state = qlstm._initial_state
 
-    concat_outputs = qlstm.outputs[-1]
-    state_fw = qlstm.state_fw
-    state_bw = qlstm.state_bw
-    output = tf.reshape(concat_outputs, [-1, self.size])
-    print("Shape after concatting + reshaping: %s"%output.get_shape())
-    softmax_w = tf.get_variable(
-        "softmax_w", [self.size, choices_size], dtype=data_type())
-    softmax_b = tf.get_variable("softmax_b", [choices_size], dtype=data_type())
-    print("Softmax shape:%s,%s"%(softmax_w.get_shape(),softmax_b.get_shape()))
-    logits = tf.matmul(output, softmax_w) + softmax_b
-    self._logits = tf.reshape(logits,[self.batch_size,-1,2,choices_size])
-    self._logits = tf.reduce_max(self.logits,reduction_indices=2)
-    logits = tf.reshape(self._logits,[-1,choices_size])
-    self._predictions = tf.argmax(self._logits,2)
-    print("Logits shape : %s"%logits.get_shape())
+        concat_outputs = qlstm.outputs[-1]
+        state_fw = qlstm.state_fw
+        state_bw = qlstm.state_bw
+        output = tf.reshape(concat_outputs, [-1, self.size])
+        print("Shape after concatting + reshaping: %s"%output.get_shape())
+        softmax_w = tf.get_variable(
+            "softmax_w", [self.size, choices_size], dtype=data_type())
+        softmax_b = tf.get_variable("softmax_b", [choices_size], dtype=data_type())
+        print("Softmax shape:%s,%s"%(softmax_w.get_shape(),softmax_b.get_shape()))
+        logits = tf.matmul(output, softmax_w) + softmax_b
+        self._logits = tf.reshape(logits,[self.batch_size,-1,2,choices_size])
+        self._logits = tf.reduce_max(self.logits,reduction_indices=2)
+        logits = tf.reshape(self._logits,[-1,choices_size])
+        self._predictions = tf.argmax(self._logits,2)
+        print("Logits shape : %s"%logits.get_shape())
 
-    print("original y shape: %s"%self.input_y.get_shape())
-    y_ext = tf.expand_dims(self.input_y,2)
-    y_doubles = tf.concat(2,[y_ext,y_ext])
-    print("new y shape: %s"%y_doubles.get_shape())
-    y_grp = tf.reshape(y_ext,[self.batch_size,-1])
-    y_grp = tf.reduce_max(y_grp,reduction_indices=1)
-    loss_weights = tf.ones([self.batch_size ],dtype=data_type())
-    print("y shape: %s"%y_grp.get_shape())
-    print("loss shape: %s"%loss_weights.get_shape())
-    loss = tf.nn.seq2seq.sequence_loss_by_example(
-        [logits],
-        [y_grp],
-        [loss_weights])
-    correct_preds = tf.equal(tf.to_int32(self._predictions),y_grp)
-    self._acc = tf.reduce_mean(tf.cast(correct_preds,"float"))
-    self._cost = cost = tf.reduce_sum(loss) / self.batch_size
-    self._final_state = (state_fw,state_bw)
+        print("original y shape: %s"%self.input_y.get_shape())
+        y_ext = tf.expand_dims(self.input_y,2)
+        y_doubles = tf.concat(2,[y_ext,y_ext])
+        print("new y shape: %s"%y_doubles.get_shape())
+        y_grp = tf.reshape(y_ext,[self.batch_size,-1])
+        y_grp = tf.reduce_max(y_grp,reduction_indices=1)
+        loss_weights = tf.ones([self.batch_size ],dtype=data_type())
+        print("y shape: %s"%y_grp.get_shape())
+        print("loss shape: %s"%loss_weights.get_shape())
+        loss = tf.nn.seq2seq.sequence_loss_by_example(
+            [logits],
+            [y_grp],
+            [loss_weights])
+        correct_preds = tf.equal(tf.to_int32(self._predictions),y_grp)
+        self._acc = tf.reduce_mean(tf.cast(correct_preds,"float"))
+        self._cost = cost = tf.reduce_sum(loss) / self.batch_size
+        self._final_state = (state_fw,state_bw)
 
-    if not is_training:
-      return
+        if not is_training:
+          return
 
-    self._lr = tf.Variable(0.0, trainable=False)
-    tvars = tf.trainable_variables()
-    grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                      config.max_grad_norm)
-    optimizer = tf.train.GradientDescentOptimizer(self._lr)
-    self._train_op = optimizer.apply_gradients(
-        zip(grads, tvars),
-        global_step=tf.contrib.framework.get_or_create_global_step())
+        self._lr = tf.Variable(0.0, trainable=False)
+        tvars = tf.trainable_variables()
+        grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
+                                          config.max_grad_norm)
+        optimizer = tf.train.GradientDescentOptimizer(self._lr)
+        self._train_op = optimizer.apply_gradients(
+            zip(grads, tvars),
+            global_step=tf.contrib.framework.get_or_create_global_step())
 
-    self._new_lr = tf.placeholder(
-        tf.float32, shape=[], name="new_learning_rate")
-    self._lr_update = tf.assign(self._lr, self._new_lr)
+        self._new_lr = tf.placeholder(
+            tf.float32, shape=[], name="new_learning_rate")
+        self._lr_update = tf.assign(self._lr, self._new_lr)
 
     def assign_lr(self, session, lr_value):
         session.run(self._lr_update, feed_dict={self._new_lr: lr_value})
@@ -209,7 +208,7 @@ class SmallConfig(object):
     learning_rate = 0.01
     max_grad_norm = 5
     num_layers = 2
-    num_steps = 70
+    num_steps = 300
     hidden_size = 200
     max_epoch = 4
     max_max_epoch = 13
@@ -237,9 +236,11 @@ class TestConfig(object):
 def run_epoch(session, model, input, eval_op=None, verbose=False):
     """Runs the model on the given data."""
     start_time = time.time()
-    for j,batch in enumerate(input):
+    context_steps = model.context_steps
 
-        questions,context,choices,labels,map,context_lens,qs_lens = batch
+    for j, batch in enumerate(input):
+
+        questions, context, choices, labels, map, context_lens, qs_lens = batch
         mapped_labels = ([model.labels_idx.index(x) for x in labels])
 
         state = session.run(model.initial_state)
@@ -255,21 +256,21 @@ def run_epoch(session, model, input, eval_op=None, verbose=False):
         if eval_op is not None:
             fetches["eval_op"] = eval_op
 
-        for i, step in enumerate(context):
+        for step_ind, step in enumerate(context):
             feed_dict = {}
             feed_dict[model.initial_state] = state
             feed_dict[model.input_x] = step
             reshape_labels = np.array([x*np.ones(len(step[1])) for x in mapped_labels])
-            feed_dict[model.input_y]=reshape_labels
-            #feed_dict[model.sequence_lengths] = context_lens
-            seq_len = rn.get_seq_length(step)
+            feed_dict[model.input_y] = reshape_labels
+            seq_len = rn.get_seq_length(
+                context_lens, step_ind, context_steps)
             feed_dict[model.sequence_lengths] = seq_len
-
+            print(seq_len)
             vals = session.run(fetches, feed_dict)
             cost = vals["cost"]
             state = vals["final_state"]
-            if i==0:
-                print("batch %s; accuracy: %s"%(j,vals["acc"]))
+            if step_ind==0:
+                print("batch %s; accuracy: %s"%(j, vals["acc"]))
 
                 print("predictions: %s"%vals["predictions"].T)
 
@@ -308,7 +309,7 @@ def main(_):
     train_iter = rn.batch_iter(
         train.contexts, train.questions,
         train.choices, train.labels, train.choices_map, train.context_lens,
-        train.qs_lens,batch_size=config.batch_size,
+        train.qs_lens, batch_size=config.batch_size,
         num_epochs=config.max_epoch, context_num_steps=c_steps,
         question_num_steps=q_steps)
 
@@ -317,9 +318,9 @@ def main(_):
                                                     config.init_scale)
         with tf.name_scope("Train"):
             with tf.variable_scope("Model", reuse=None, initializer=initializer):
-                m = PTBModel(is_training=True, config=config,vocab_size=train.vocab_size,\
-                        labels_idx=train.labels_idx,context_steps=c_steps,\
-                question_steps = q_steps)
+                m = PTBModel(is_training=True, config=config, vocab_size=train.vocab_size,
+                             labels_idx=train.labels_idx, context_steps=c_steps,
+                             question_steps = q_steps)
         tf.scalar_summary("Training Loss", m.cost)
         tf.scalar_summary("Learning Rate", m.lr)
 
@@ -330,7 +331,7 @@ def main(_):
                 m.assign_lr(session, config.learning_rate * lr_decay)
 
                 print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-                run_epoch(session, m, train_iter,eval_op=m.train_op,
+                run_epoch(session, m, train_iter, eval_op=m.train_op,
                           verbose=True)
             if FLAGS.save_path:
                 print("Saving model to %s." % FLAGS.save_path)

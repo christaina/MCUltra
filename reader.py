@@ -190,12 +190,12 @@ def load_data(data_path=None):
         context_lens, qs_lens)
 
 
-def get_seq_length(mat):
+def get_seq_length(lengths, step_ind, num_steps):
     """
-    get true sequence lengths for input into model
+    Get truncated sequence length.
     """
-    zero_mask = ~np.ma.masked_where(mat==0, mat).mask
-    return sum(zero_mask.T)
+    var_qs_len = step_ind * num_steps * np.ones_like(lengths)
+    return np.maximum(0, np.minimum(num_steps, lengths - var_qs_len)).astype(np.int32)
 
 
 def batch_iter(contexts, questions, choices, labels, choices_map,
