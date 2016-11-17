@@ -50,10 +50,11 @@ class QuesLSTMAnsEmbedding(object):
         self.sequence_length = tf.placeholder(tf.int32, shape=[batch_size])
         outputs, self.final_state = tf.nn.rnn(
             cell, inputs, dtype=tf.float32, sequence_length=self.sequence_length)
+        self.question_output = outputs[-1]
 
     def get_attention(self):
-        # Should be the output of the last-step of the question-LSTM.
         batch_size = FLAGS.batch_size
+        # Should be the output of the last-step of the question-LSTM.
         self.question_embedding = tf.placeholder(
             tf.float32, shape=[batch_size, FLAGS.qs_hidden_size])
         self.context = tf.placeholder(tf.int32, shape=[batch_size, None])
@@ -127,11 +128,16 @@ def run_epoch(data_iter, model, session, choices_length):
                 model.question: qs_step,
                 model.sequence_length: seq_lengths,
                 model.initial_state: state}
-            state = session.run(model.final_state, feed_dict)
+            ops = {
+                "output": model.question_output,
+                "state": model.final_state}
+            vals = session.run(ops, feed_dict)
+            state = vals["state"]
+            qs_embedding = vals['output']
 
         context = np.hstack((cont_batch))
         feed_dict = {
-            model.question_embedding: state.h,
+            model.question_embedding: qs_embedding,
             model.context: context,
             model.context_length: cont_len,
             model.choices: curr_choices,
