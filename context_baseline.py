@@ -46,25 +46,27 @@ class BiLSTM(object):
     """
     Bidirectional LSTM
     """
-    def __init__(self,input_x,sequence_lengths,\
-            is_training,config,num_steps,embedding,name):
+    def __init__(self, input_x, sequence_lengths,
+                 is_training, config, num_steps, embedding,name):
         self.batch_size=config.batch_size
         self.size = config.hidden_size
         self.num_steps = num_steps
         self.input_x = input_x
         self.sequence_lengths = sequence_lengths
-        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0,\
-                state_is_tuple=False)
-        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.size, forget_bias=0.0,\
-                state_is_tuple=False)
+        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(
+            self.size, forget_bias=0.0, state_is_tuple=False)
+        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(
+            self.size, forget_bias=0.0, state_is_tuple=False)
         if is_training and config.keep_prob < 1:
           lstm_fw_cell = tf.nn.rnn_cell.DropoutWrapper(
               lstm_fw_cell, output_keep_prob=config.keep_prob)
           lstm_bw_cell = tf.nn.rnn_cell.DropoutWrapper(
               lstm_bw_cell, output_keep_prob=config.keep_prob)
-        self._initial_state_fw = lstm_fw_cell.zero_state(self.batch_size, data_type())
-        self._initial_state_bw = lstm_bw_cell.zero_state(self.batch_size, data_type())
-        self._initial_state = (self._initial_state_fw,self._initial_state_bw)
+        self._initial_state_fw = lstm_fw_cell.zero_state(
+            self.batch_size, data_type())
+        self._initial_state_bw = lstm_bw_cell.zero_state(
+            self.batch_size, data_type())
+        self._initial_state = (self._initial_state_fw, self._initial_state_bw)
         inputs = tf.nn.embedding_lookup(embedding, self.input_x)
         if is_training and config.keep_prob < 1:
             inputs = tf.nn.dropout(inputs, config.keep_prob)
@@ -72,11 +74,11 @@ class BiLSTM(object):
         inputs = [tf.squeeze(input_step, [1])
                   for input_step in tf.split(1, self.num_steps, inputs)]
         self.outputs, self.state_fw, self.state_bw = tf.nn.bidirectional_rnn(
-                lstm_fw_cell, \
-                        lstm_bw_cell,\
-                        inputs, \
-                        initial_state_fw=self._initial_state[0],\
-                        initial_state_bw=self._initial_state[1],\
+                lstm_fw_cell,
+                lstm_bw_cell,
+                inputs,
+                initial_state_fw=self._initial_state[0],
+                initial_state_bw=self._initial_state[1],\
                         sequence_length=self.sequence_lengths,scope="BiRNN_%s"%name)
 
 
@@ -84,7 +86,7 @@ class BiLSTM(object):
 class PTBModel(object):
     """The PTB model."""
 
-    def __init__(self, is_training, config, vocab_size, labels_idx, context_steps,question_steps):
+    def __init__(self, is_training, config, vocab_size, labels_idx, context_steps, question_steps):
 
         print("input data shape:")
         self.num_steps =context_steps
@@ -96,23 +98,24 @@ class PTBModel(object):
         self.context_steps = context_steps
         self.question_steps = question_steps
 
-        self.input_x = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
-        self.input_y = tf.placeholder(tf.int32,[self.batch_size,self.context_steps])
+        self.input_x = tf.placeholder(tf.int32, [self.batch_size, self.context_steps])
+        self.input_y = tf.placeholder(tf.int32, [self.batch_size, self.context_steps])
         self.sequence_lengths = tf.placeholder(tf.int32, [self.batch_size])
         with tf.device("/cpu:0"):
           embedding = tf.get_variable(
               "embedding", [self.vocab_size, self.size], dtype=data_type())
 
         # bidirectional lstm
-        qlstm = BiLSTM(self.input_x,self.sequence_lengths,\
-                is_training,config,context_steps,embedding,name='question')
+        qlstm = BiLSTM(self.input_x, self.sequence_lengths,
+                       is_training, config, context_steps, embedding, name='context')
         self._initial_state = qlstm._initial_state
+        print("Shape of last output: %s" % qlstm.outputs[-1].get_shape())
 
         concat_outputs = qlstm.outputs[-1]
         state_fw = qlstm.state_fw
         state_bw = qlstm.state_bw
         output = tf.reshape(concat_outputs, [-1, self.size])
-        print("Shape after concatting + reshaping: %s"%output.get_shape())
+        print("Shape after concatting + reshaping: %s" % output.get_shape())
         softmax_w = tf.get_variable(
             "softmax_w", [self.size, choices_size], dtype=data_type())
         softmax_b = tf.get_variable("softmax_b", [choices_size], dtype=data_type())
@@ -122,7 +125,7 @@ class PTBModel(object):
         self._logits = tf.reduce_max(self.logits,reduction_indices=2)
         logits = tf.reshape(self._logits,[-1,choices_size])
         self._predictions = tf.argmax(self._logits,2)
-        print("Logits shape : %s"%logits.get_shape())
+        print("Logits shape : %s" % logits.get_shape())
 
         print("original y shape: %s"%self.input_y.get_shape())
         y_ext = tf.expand_dims(self.input_y,2)
@@ -140,7 +143,7 @@ class PTBModel(object):
         correct_preds = tf.equal(tf.to_int32(self._predictions),y_grp)
         self._acc = tf.reduce_mean(tf.cast(correct_preds,"float"))
         self._cost = cost = tf.reduce_sum(loss) / self.batch_size
-        self._final_state = (state_fw,state_bw)
+        self._final_state = state_fw, state_bw
 
         if not is_training:
           return
