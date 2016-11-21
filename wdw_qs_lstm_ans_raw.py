@@ -81,9 +81,9 @@ class QuesLSTMAnsEmbedding(object):
             curr_labels = self.labels[num_batch]
 
             ans_embed = tf.nn.embedding_lookup(answer_embedding, curr_ans)
-            attentions = tf.matmul(
+            attentions = tf.nn.softmax(tf.matmul(
                 tf.expand_dims(curr_qs_emb, dim=0),
-                tf.matmul(bilinear, tf.transpose(ans_embed)))
+                tf.matmul(bilinear, tf.transpose(ans_embed))))
             ans_repres = tf.matmul(attentions, ans_embed)
             raw_preds = tf.add(tf.matmul(ans_repres, softmax_W), softmax_b)
             correct.append(tf.equal(
