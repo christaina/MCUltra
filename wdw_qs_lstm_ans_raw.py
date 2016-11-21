@@ -173,7 +173,7 @@ def main():
             contexts, questions, choices, labels, choices_map,
             context_lens, qs_lens,
             batch_size=FLAGS.batch_size,
-            num_epochs=FLAGS.num_epochs, random_state=i,
+            num_epochs=1, random_state=i,
             vocabulary=vocabulary
         )
         print("Running epoch %d" % i)
