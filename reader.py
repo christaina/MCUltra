@@ -119,7 +119,7 @@ def encode_choices(context, question, choices, label, i):
             choices_map[choice] = "@entity%s" % entity_num
             entity_num += 1
         if choice not in context:
-            print("choice does notexist in context: %s, id %d" % (choice, i))
+            print("choice does not exist in context: %s, id %d" % (choice, i))
         context = context.replace(choice, choices_map[choice])
         question = question.replace(choice, choices_map[choice])
         label = label.replace(choice, choices_map[choice])
@@ -197,9 +197,21 @@ def get_seq_length(lengths, step_ind, num_steps):
     var_qs_len = step_ind * num_steps * np.ones_like(lengths)
     return np.maximum(0, np.minimum(num_steps, lengths - var_qs_len)).astype(np.int32)
 
+def pad_eval(mat,len):
+    """
+    Pad eval matrix to size of training matrix
+    """
+    s = mat.shape
+    if len<s[1]:
+        print("Training width %s is less than val width (%s). Cutting off"%(len,s[1]))
+        mat = mat.T[:len].T
+    else:
+        pad = np.zeros((s[0],len-s[1]))
+        mat = np.concatenate((mat,pad),axis=1)
+    return mat
 
 def batch_iter(contexts, questions, choices, labels, choices_map,
-               context_lens, qs_lens, batch_size=32, num_epochs=5,
+               context_lens, qs_lens, batch_size=32, 
                random_state=None, context_num_steps=20,
                question_num_steps=20, vocabulary=None):
     """
@@ -207,14 +219,15 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     """
     rng = np.random.RandomState(random_state)
     # build vocab for train data
-    if not vocabulary:
-        vocabulary = get_vocab(questions, contexts, min_frequency=10)
+    #if not vocabulary:
+    #    vocabulary = get_vocab(questions, contexts, min_frequency=10)
 
     choices = np.array([" ".join(x) for x in choices])
     labels = np.array(labels)
     choices_map = np.array(choices_map)
-    questions = vocab_transform(questions, vocabulary)
-    context = vocab_transform(contexts, vocabulary)
+    #questions = vocab_transform(questions, vocabulary)
+    #context = vocab_transform(contexts, vocabulary)
+    context = contexts
     data_size = len(context)
     data_indices = np.arange(data_size)
     num_batches_per_epoch = int(data_size / batch_size)
@@ -224,32 +237,31 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     qs_len = questions.shape[1]
     qs_lim = (qs_len // question_num_steps) * question_num_steps
 
-    for epoch in range(num_epochs):
-        # Shuffle the data at each epoch
-        shuffle_indices = rng.permutation(data_indices)
-        shuffled_qs = questions[shuffle_indices]
-        shuffled_cont = context[shuffle_indices]
-        shuffled_choices = choices[shuffle_indices]
-        shuffled_map = choices_map[shuffle_indices]
-        shuffled_labels = labels[shuffle_indices]
-        shuf_cont_lens = context_lens[shuffle_indices]
-        shuf_qs_lens = qs_lens[shuffle_indices]
+    # Shuffle the data at each epoch
+    shuffle_indices = rng.permutation(data_indices)
+    shuffled_qs = questions[shuffle_indices]
+    shuffled_cont = context[shuffle_indices]
+    shuffled_choices = choices[shuffle_indices]
+    shuffled_map = choices_map[shuffle_indices]
+    shuffled_labels = labels[shuffle_indices]
+    shuf_cont_lens = context_lens[shuffle_indices]
+    shuf_qs_lens = qs_lens[shuffle_indices]
 
-        for batch_num in range(num_batches_per_epoch):
-            start_index = batch_num * batch_size
-            end_index = start_index + batch_size
-            curr_qs_batch = shuffled_qs[start_index: end_index]
-            curr_cont_batch = shuffled_cont[start_index: end_index]
+    for batch_num in range(num_batches_per_epoch):
+        start_index = batch_num * batch_size
+        end_index = start_index + batch_size
+        curr_qs_batch = shuffled_qs[start_index: end_index]
+        curr_cont_batch = shuffled_cont[start_index: end_index]
 
-            cont_batches = [curr_cont_batch[:, start_ind: start_ind + context_num_steps]
-                            for start_ind in range(0, cont_lim, context_num_steps)]
-            qs_batches = [curr_qs_batch[:, start_ind: start_ind + question_num_steps]
-                            for start_ind in range(0, qs_lim, question_num_steps)]
-            yield (
-                qs_batches,
-                cont_batches,
-                shuffled_choices[start_index: end_index],
-                shuffled_labels[start_index: end_index],
-                shuffled_map[start_index: end_index],
-                shuf_cont_lens[start_index: end_index],
-                shuf_qs_lens[start_index: end_index])
+        cont_batches = [curr_cont_batch[:, start_ind: start_ind + context_num_steps]
+                        for start_ind in range(0, cont_lim, context_num_steps)]
+        qs_batches = [curr_qs_batch[:, start_ind: start_ind + question_num_steps]
+                        for start_ind in range(0, qs_lim, question_num_steps)]
+        yield (
+            qs_batches,
+            cont_batches,
+            shuffled_choices[start_index: end_index],
+            shuffled_labels[start_index: end_index],
+            shuffled_map[start_index: end_index],
+            shuf_cont_lens[start_index: end_index],
+            shuf_qs_lens[start_index: end_index])
