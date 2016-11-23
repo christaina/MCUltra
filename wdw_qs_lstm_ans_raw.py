@@ -27,13 +27,13 @@ FLAGS = flags.FLAGS
 
 
 class QuesLSTMAnsEmbedding(object):
-    def __init__(self, vocab_size, all_choices, batch_size):
+    def __init__(self, vocab_size, all_choices):
+        batch_size = FLAGS.batch_size
         self.len_choices = len(all_choices)
         num_steps = FLAGS.num_steps
         hidden_size = FLAGS.qs_hidden_size
         self.vocab_size = vocab_size
 
-        self.batch_size = batch_size
         self.question = tf.placeholder(
             tf.int32, shape=[batch_size, num_steps])
         cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size)
@@ -93,7 +93,9 @@ class QuesLSTMAnsEmbedding(object):
                 tf.nn.softmax_cross_entropy_with_logits(raw_preds, curr_labels))
 
         self.loss = tf.reduce_mean(losses)
-        self.accuracy = tf.reduce_mean(tf.cast(correct, "float"))
+        correct_float = tf.cast(correct, "float")
+        self.accuracy = tf.reduce_mean(correct_float)
+        self.correct = tf.reduce_sum(correct_float)
         tvars = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars),
                                           FLAGS.max_grad_norm)
@@ -102,6 +104,8 @@ class QuesLSTMAnsEmbedding(object):
 
 
 def run_epoch(data_iter, model, session, choices_length, is_training=True):
+    n_correct = 0.0
+    n_samples = 0.0
     for i, (question, context, choice_batch, lab_batch, map_batch,
             cont_len, qs_len) in enumerate(data_iter):
 
@@ -117,7 +121,6 @@ def run_epoch(data_iter, model, session, choices_length, is_training=True):
 
         # Obtain question embedding from the last-step of the LSTM.
         feed_dict = {
-            model.batch_size: question.shape[0],
             model.question: question,
             model.sequence_length: qs_len,
             model.context: context,
@@ -129,10 +132,18 @@ def run_epoch(data_iter, model, session, choices_length, is_training=True):
             ops = {"loss": model.loss, "accuracy": model.accuracy,
                    "optimizer": model.optimizer}
         else:
-            ops = {"loss": model.loss, "accuracy": model.accuracy}
+            ops = {"loss": model.loss, "correct": model.correct}
         vals = session.run(ops, feed_dict)
-        print("accuracy on batch %d, %0.3f" % (i, vals['accuracy']))
-    #print(vals['loss'])
+
+        if is_training:
+            print("accuracy on batch %d, %0.3f" % (i, vals['accuracy']))
+        else:
+            n_correct += vals["correct"]
+        #     print("accuracy on batch %d, %0.3f" % (i, vals['accuracy']))
+        n_samples += 32
+
+    if not is_training:
+        print("accuracy: %0.4f" % (n_correct / n_samples))
 
 
 def main():
@@ -152,22 +163,11 @@ def main():
 
     with tf.variable_scope("rc_model", reuse=None, initializer=initializer):
         model = QuesLSTMAnsEmbedding(
-            vocab_size=vocab_size, all_choices=all_choices,
-            batch_size=FLAGS.batch_size)
+            vocab_size=vocab_size, all_choices=all_choices)
 
-    with tf.variable_scope("rc_model", reuse=True):
-        test_model = QuesLSTMAnsEmbedding(
-            vocab_size=vocab_size, all_choices=all_choices,
-            batch_size=contexts.shape[0])
 
     session = tf.Session()
     session.run(tf.initialize_all_variables())
-    test_iter = batch_iter(
-        contexts, questions, choices, labels, choices_map,
-        context_lens, qs_lens,
-        batch_size=contexts.shape[0],
-        question_num_steps=FLAGS.num_steps,
-        context_num_steps=contexts.shape[1])
 
     for i in range(FLAGS.num_epochs):
         data_iter = batch_iter(
@@ -176,10 +176,18 @@ def main():
             batch_size=FLAGS.batch_size,
             random_state=i, question_num_steps=FLAGS.num_steps,
             context_num_steps=contexts.shape[1])
-        print("Running epoch %d" % i)
+        print("Running epoch %d" % (i + 1))
 
         run_epoch(data_iter, model, session, len(all_choices))
-        run_epoch(test_iter, test_model, session, len(all_choices),
+
+        data_iter = batch_iter(
+            contexts, questions, choices, labels, choices_map,
+            context_lens, qs_lens,
+            batch_size=FLAGS.batch_size,
+            random_state=i, question_num_steps=FLAGS.num_steps,
+            context_num_steps=contexts.shape[1])
+        print("Accuracy after epoch %d" % (i + 1))
+        run_epoch(data_iter, model, session, len(all_choices),
                   is_training=False)
 
 
