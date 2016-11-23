@@ -6,6 +6,8 @@ from reader import batch_iter
 from reader import build_choices
 from reader import load_data
 from reader import get_vocab
+from reader import vocab_transform
+
 
 flags = tf.flags
 logging = tf.logging
@@ -25,13 +27,13 @@ FLAGS = flags.FLAGS
 
 
 class QuesLSTMAnsEmbedding(object):
-    def __init__(self, vocab_size, all_choices, is_training=True):
+    def __init__(self, vocab_size, all_choices, batch_size):
         self.len_choices = len(all_choices)
-        batch_size = FLAGS.batch_size
         num_steps = FLAGS.num_steps
         hidden_size = FLAGS.qs_hidden_size
         self.vocab_size = vocab_size
 
+        self.batch_size = batch_size
         self.question = tf.placeholder(
             tf.int32, shape=[batch_size, num_steps])
         cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size)
@@ -48,15 +50,10 @@ class QuesLSTMAnsEmbedding(object):
                 qs_embedding, self.question[:, num_step]))
 
         self.sequence_length = tf.placeholder(tf.int32, shape=[batch_size])
-        outputs, self.final_state = tf.nn.rnn(
+        outputs, hidden_state = tf.nn.rnn(
             cell, inputs, dtype=tf.float32, sequence_length=self.sequence_length)
-        self.question_output = outputs[-1]
+        hidden_state = hidden_state.h
 
-    def get_attention(self):
-        batch_size = FLAGS.batch_size
-        # Should be the output of the last-step of the question-LSTM.
-        self.question_embedding = tf.placeholder(
-            tf.float32, shape=[batch_size, FLAGS.qs_hidden_size])
         self.context = tf.placeholder(tf.int32, shape=[batch_size, None])
         self.context_length = tf.placeholder(tf.int32, shape=[batch_size])
         self.choices = tf.placeholder(tf.int32, shape=[batch_size, self.len_choices])
@@ -71,12 +68,13 @@ class QuesLSTMAnsEmbedding(object):
             [FLAGS.qs_hidden_size, answer_dim], dtype=tf.float32)
         softmax_W = tf.get_variable("softmax_W", [answer_dim, self.len_choices])
         softmax_b = tf.get_variable("softmax_b", [self.len_choices])
+        self.qs_embedding = qs_embedding.get_shape()
 
         # Calculate attentions.
         losses = []
         correct = []
         for num_batch in range(batch_size):
-            curr_qs_emb = self.question_embedding[num_batch]
+            curr_qs_emb = qs_embedding[num_batch]
             curr_ans = self.context[num_batch, :self.context_length[num_batch]]
             curr_labels = self.labels[num_batch]
 
@@ -103,46 +101,35 @@ class QuesLSTMAnsEmbedding(object):
         self.optimizer = optimizer.apply_gradients(zip(grads, tvars))
 
 
-def run_epoch(data_iter, model, session, choices_length):
-    for i, (qs_batch, cont_batch, choice_batch, lab_batch, map_batch,
-         cont_len, qs_len) in enumerate(data_iter):
+def run_epoch(data_iter, model, session, choices_length, is_training=True):
+    for i, (question, context, choice_batch, lab_batch, map_batch,
+            cont_len, qs_len) in enumerate(data_iter):
 
         lb = LabelBinarizer()
         lb.fit(np.arange(choices_length))
         curr_labels = lb.transform(
             [int(label[-1]) for label in lab_batch])
 
-        curr_choices = np.zeros((FLAGS.batch_size, choices_length))
+        curr_choices = np.zeros((question.shape[0], choices_length))
         for ind, choices in enumerate(choice_batch):
             indices = [int(i[-1]) for i in choices.split(" ")]
             curr_choices[ind, indices] = 1
 
-        var_qs_len = FLAGS.num_steps * np.ones(FLAGS.batch_size)
-        state = session.run(model.initial_state)
-
         # Obtain question embedding from the last-step of the LSTM.
-        for step_epoch, qs_step in enumerate(qs_batch):
-            curr_step = step_epoch * var_qs_len
-            seq_lengths = np.maximum(0, np.minimum(FLAGS.num_steps, qs_len - curr_step))
-            feed_dict = {
-                model.question: qs_step,
-                model.sequence_length: seq_lengths,
-                model.initial_state: state}
-            ops = {
-                "output": model.question_output,
-                "state": model.final_state}
-            vals = session.run(ops, feed_dict)
-            state = vals["state"]
-            qs_embedding = vals['output']
-
-        context = np.hstack((cont_batch))
         feed_dict = {
-            model.question_embedding: qs_embedding,
+            model.batch_size: question.shape[0],
+            model.question: question,
+            model.sequence_length: qs_len,
             model.context: context,
             model.context_length: cont_len,
             model.choices: curr_choices,
             model.labels: curr_labels}
-        ops = {"loss": model.loss, "accuracy": model.accuracy, "optimizer": model.optimizer}
+
+        if is_training:
+            ops = {"loss": model.loss, "accuracy": model.accuracy,
+                   "optimizer": model.optimizer}
+        else:
+            ops = {"loss": model.loss, "accuracy": model.accuracy}
         vals = session.run(ops, feed_dict)
         print("accuracy on batch %d, %0.3f" % (i, vals['accuracy']))
     #print(vals['loss'])
@@ -155,29 +142,46 @@ def main():
     contexts, questions, choices, labels, choices_map, \
         context_lens, qs_lens = load_data(FLAGS.data_path)
     vocabulary = get_vocab(questions, contexts, min_frequency=10)
-    vocab_size = len(vocabulary.vocabulary_)
+    contexts = vocab_transform(contexts, vocabulary)
+    questions = vocab_transform(questions, vocabulary)
     all_choices = build_choices(choices)
+    vocab_size = len(vocabulary.vocabulary_)
+
     initializer = tf.random_uniform_initializer(-FLAGS.init_scale,
                                                 FLAGS.init_scale)
 
     with tf.variable_scope("rc_model", reuse=None, initializer=initializer):
         model = QuesLSTMAnsEmbedding(
-            vocab_size=vocab_size, all_choices=all_choices, is_training=True)
-        model.get_attention()
+            vocab_size=vocab_size, all_choices=all_choices,
+            batch_size=FLAGS.batch_size)
+
+    with tf.variable_scope("rc_model", reuse=True):
+        test_model = QuesLSTMAnsEmbedding(
+            vocab_size=vocab_size, all_choices=all_choices,
+            batch_size=contexts.shape[0])
 
     session = tf.Session()
     session.run(tf.initialize_all_variables())
+    test_iter = batch_iter(
+        contexts, questions, choices, labels, choices_map,
+        context_lens, qs_lens,
+        batch_size=contexts.shape[0],
+        question_num_steps=FLAGS.num_steps,
+        context_num_steps=contexts.shape[1])
 
     for i in range(FLAGS.num_epochs):
         data_iter = batch_iter(
             contexts, questions, choices, labels, choices_map,
             context_lens, qs_lens,
             batch_size=FLAGS.batch_size,
-            num_epochs=1, random_state=i,
-            vocabulary=vocabulary
-        )
+            random_state=i, question_num_steps=FLAGS.num_steps,
+            context_num_steps=contexts.shape[1])
         print("Running epoch %d" % i)
+
         run_epoch(data_iter, model, session, len(all_choices))
+        run_epoch(test_iter, test_model, session, len(all_choices),
+                  is_training=False)
+
 
 if __name__ == "__main__":
     main()

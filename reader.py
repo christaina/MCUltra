@@ -225,13 +225,9 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     qs_lim = (qs_len // question_num_steps) * question_num_steps
 
     # Clip contexts
-    print(cont_len)
-    print(context_num_steps)
     contexts = contexts[:, :min(cont_len, context_num_steps)]
 
     # Clip questions
-    print(qs_len)
-    print(question_num_steps)
     questions = questions[:, :min(qs_len, question_num_steps)]
 
     # Shuffle the data at each epoch
