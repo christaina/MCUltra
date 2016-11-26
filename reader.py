@@ -189,22 +189,23 @@ def get_seq_length(lengths, step_ind, num_steps):
     var_qs_len = step_ind * num_steps * np.ones_like(lengths)
     return np.maximum(0, np.minimum(num_steps, lengths - var_qs_len)).astype(np.int32)
 
-def pad_eval(mat,len):
+def pad_eval(mat, length):
     """
     Pad eval matrix to size of training matrix
     """
     s = mat.shape
-    if len<s[1]:
-        print("Training width %s is less than val width (%s). Cutting off"%(len,s[1]))
-        mat = mat.T[:len].T
+    if length < s[1]:
+        print("Training width %s is less than provided width (%s). Cutting off"
+              %(length, s[1]))
+        mat = mat[:, :length]
     else:
-        pad = np.zeros((s[0],len-s[1]))
-        mat = np.concatenate((mat,pad),axis=1)
+        pad = np.zeros((s[0], length - s[1]))
+        mat = np.concatenate((mat, pad),axis=1)
     return mat
 
 def batch_iter(contexts, questions, choices, labels, choices_map,
                context_lens, qs_lens, batch_size=32,
-               random_state=None, context_num_steps=50,
+               random_state=None, context_num_steps=200,
                question_num_steps=20):
     """
     Generates a batch iterator for a dataset.
