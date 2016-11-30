@@ -218,6 +218,8 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
 
     data_size = len(contexts)
     data_indices = np.arange(data_size)
+    # sort by context lengths
+    sorted_context_inds = np.argsort(context_lens)
     num_batches_per_epoch = int(data_size / batch_size)
 
     cont_len = contexts.shape[1]
@@ -231,8 +233,19 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     # Clip questions
     questions = questions[:, :min(qs_len, question_num_steps)]
 
+    """
     # Shuffle the data at each epoch
     shuffle_indices = rng.permutation(data_indices)
+    shuffled_qs = questions[shuffle_indices]
+    shuffled_cont = contexts[shuffle_indices]
+    shuffled_choices = choices[shuffle_indices]
+    shuffled_map = choices_map[shuffle_indices]
+    shuffled_labels = labels[shuffle_indices]
+    shuf_cont_lens = context_lens[shuffle_indices]
+    shuf_qs_lens = qs_lens[shuffle_indices]
+    """
+
+    shuffle_indices = sorted_context_inds
     shuffled_qs = questions[shuffle_indices]
     shuffled_cont = contexts[shuffle_indices]
     shuffled_choices = choices[shuffle_indices]
@@ -246,8 +259,8 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
         end_index = start_index + batch_size
 
         yield (
-            questions[start_index: end_index],
-            contexts[start_index: end_index],
+            mask_narrow(questions[start_index: end_index]),
+            mask_narrow(contexts[start_index: end_index]),
             shuffled_choices[start_index: end_index],
             shuffled_labels[start_index: end_index],
             shuffled_map[start_index: end_index],
