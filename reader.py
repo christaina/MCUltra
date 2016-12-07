@@ -203,6 +203,7 @@ def pad_eval(mat, length):
         mat = np.concatenate((mat, pad),axis=1)
     return mat
 
+
 def batch_iter(contexts, questions, choices, labels, choices_map,
                context_lens, qs_lens, batch_size=32,
                random_state=None, context_num_steps=None,
@@ -257,15 +258,18 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     for batch_num in range(num_batches_per_epoch):
         start_index = batch_num * batch_size
         end_index = start_index + batch_size
+        curr_qs_lens = shuf_qs_lens[start_index: end_index]
+        curr_cont_lens = shuf_cont_lens[start_index: end_index]
+        max_qs_lens = np.max(curr_qs_lens)
+        max_cont_lens = np.max(curr_cont_lens)
 
         yield (
-            mask_narrow(shuffled_qs[start_index: end_index]),
-            mask_narrow(shuffled_cont[start_index: end_index]),
+            shuffled_qs[start_index: end_index, :max_qs_lens],
+            shuffled_cont[start_index: end_index, :max_cont_lens],
             shuffled_choices[start_index: end_index],
             shuffled_labels[start_index: end_index],
             shuffled_map[start_index: end_index],
-            shuf_cont_lens[start_index: end_index],
-            shuf_qs_lens[start_index: end_index])
+            curr_cont_lens, curr_qs_lens)
 
 # Usage:
 # 1. Encode questions and context with identities.
