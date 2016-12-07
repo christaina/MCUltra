@@ -28,7 +28,7 @@ def get_vocab(questions, context, min_frequency=10):
 
 def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
-    return mat.T[~mask].T
+    return mat[:, ~mask]
 
 
 def vocab_transform(mat, vocab):
@@ -140,13 +140,11 @@ def load_data(data_path=None):
     lab_p = os.path.join(data_path, labels_fn)
 
     questions_file = open(qu_p, "r")
-    questions, qs_lens = strip_punctuation(
-        questions_file.readlines(), return_len=True)
+    questions = strip_punctuation(questions_file.readlines())
     questions_file.close()
 
     context_file = open(cont_p, "r")
-    context, context_lens = strip_punctuation(
-        context_file.readlines(), return_len=True)
+    context = strip_punctuation(context_file.readlines())
     context_file.close()
 
     choices_file = open(ch_p, "r")
@@ -176,6 +174,8 @@ def load_data(data_path=None):
                     new_choices[i],
                     labels[i], i)
         choices_map_all.append(choices_map)
+    context_lens = np.array([len(c.split(" ")) for c in context])
+    qs_lens = np.array([len(q.split(" ")) for q in questions])
 
     return (
         context, questions, new_choices, labels, choices_map_all,
@@ -205,8 +205,8 @@ def pad_eval(mat, length):
 
 def batch_iter(contexts, questions, choices, labels, choices_map,
                context_lens, qs_lens, batch_size=32,
-               random_state=None, context_num_steps=200,
-               question_num_steps=20):
+               random_state=None, context_num_steps=None,
+               question_num_steps=None):
     """
     Generates a batch iterator for a dataset.
     """
@@ -222,16 +222,16 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     sorted_context_inds = np.argsort(context_lens)
     num_batches_per_epoch = int(data_size / batch_size)
 
-    cont_len = contexts.shape[1]
-    cont_lim = (cont_len // context_num_steps) * context_num_steps
-    qs_len = questions.shape[1]
-    qs_lim = (qs_len // question_num_steps) * question_num_steps
-
-    # Clip contexts
-    contexts = contexts[:, :min(cont_len, context_num_steps)]
-
-    # Clip questions
-    questions = questions[:, :min(qs_len, question_num_steps)]
+    # cont_len = contexts.shape[1]
+    # cont_lim = (cont_len // context_num_steps) * context_num_steps
+    # qs_len = questions.shape[1]
+    # qs_lim = (qs_len // question_num_steps) * question_num_steps
+    #
+    # # Clip contexts
+    # contexts = contexts[:, :min(cont_len, context_num_steps)]
+    #
+    # # Clip questions
+    # questions = questions[:, :min(qs_len, question_num_steps)]
 
     """
     # Shuffle the data at each epoch
@@ -270,7 +270,7 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
 # Usage:
 # 1. Encode questions and context with identities.
 # contexts, questions, new_choices, labels, choices_map_all, context_lens, qs_lens =
-#     load_data(data_path="")
+#    load_data(data_path="")
 # 2. Fit vocabulary with questions and context.
 # vocab = get_vocab(contexts, questions)
 # 3. Transform context and questions
