@@ -7,7 +7,7 @@ import os
 import shutil
 
 import numpy as np
-import bidir_rnn
+#import bidir_rnn
 import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelBinarizer
@@ -16,23 +16,23 @@ import reader as rn
 flags = tf.flags
 logging = tf.logging
 
-flags.DEFINE_string("data_wdw", '/scratch/ceb545/nlp/project/who_did_what/Strict/',
-                    "Where the training/test data is stored.")
-flags.DEFINE_string("save_path", './runs/dump',
-                    "Model output directory.")
-flags.DEFINE_string("checkpoint_path", './runs/dump',
-                    "Model output directory.")
-flags.DEFINE_bool("use_fp16", False,
-                  "Train using 16-bit floats instead of 32bit floats")
-
-FLAGS = flags.FLAGS
+# flags.DEFINE_string("data_wdw", '/home/manoj/oogie-boogie/wdw',
+#                     "Where the training/test data is stored.")
+# flags.DEFINE_string("save_path", './runs/dump',
+#                     "Model output directory.")
+# flags.DEFINE_string("checkpoint_path", './runs/dump',
+#                     "Model output directory.")
+# flags.DEFINE_bool("use_fp16", False,
+#                   "Train using 16-bit floats instead of 32bit floats")
+#
+# FLAGS = flags.FLAGS
 
 
 def data_type():
-  return tf.float16 if FLAGS.use_fp16 else tf.float32
+  return  tf.float32
 
 class RawInput(object):
-    def __init__(self, data_bundle,vocabulary=None,c_len=None,q_len=None):
+    def __init__(self, data_bundle, vocabulary=None):#, c_len=None, q_len=None):
         (self.contexts, self.questions, self.choices, self.labels,
             self.choices_map, self.context_lens, self.qs_lens) = data_bundle
         if vocabulary:
@@ -48,53 +48,30 @@ class RawInput(object):
         self.transformed_labels_idx = [x[0] for x in list(self.vocab.transform(self.labels_idx))]
         print(self.transformed_labels_idx)
 
-        self.contexts = rn.vocab_transform(self.contexts,self.vocab)
-        self.questions = rn.vocab_transform(self.questions,self.vocab)
+        self.contexts = rn.vocab_transform(self.contexts, self.vocab)
+        self.questions = rn.vocab_transform(self.questions, self.vocab)
+
         # TODO: choices embedding
-        if c_len:
-            self.contexts = rn.pad_eval(self.contexts,c_len)
-        if q_len:
-            self.questions = rn.pad_eval(self.questions,q_len)
-        else:
-            self.c_len = len(self.contexts[0])
-            self.q_len = len(self.questions[0])
-            
-class Attention(object):
-    def __init__(self,q_output,c_output,batch_size,size):
-        #bilinear_weights = tf.ones([2*size,2*size])
-        bilinear_weights = tf.get_variable("bilinear_w",[2*size,2*size],dtype=data_type())
+        # if c_len:
+        #     self.contexts = rn.pad_eval(self.contexts, c_len)
+        # if q_len:
+        #     self.questions = rn.pad_eval(self.questions, q_len)
+        # else:
+        #     self.c_len = len(self.contexts[0])
+        #     self.q_len = len(self.questions[0])
 
-        # diag_part returns tensor with bilinear values for each batch (non-diags are uselss)
-        bilinear_terms = [tf.diag_part(tf.matmul(\
-                tf.matmul(q_output,bilinear_weights),context_term,transpose_b=True))\
-                for context_term in c_output]
-        # packs bilinear values for each word into a matrix of dim batch_size x num context
-        bilinear_matrix = tf.pack(bilinear_terms)
-
-        print("bilinear shape is %s; should be bs x cont_seq"%bilinear_matrix.get_shape())
-        self.alphas = tf.nn.softmax(bilinear_matrix)
-        print("alpha_s:%s"%self.alphas.get_shape())
-        alphas_unpacks = tf.unpack(self.alphas,axis=1)
-        c_unpacks = tf.unpack(tf.pack(c_output,axis=1))
-        print("c output len: %s"%len(c_output))
-        print(alphas_unpacks[0].get_shape())
-        print(c_unpacks[0].get_shape())
-        alpha_mult  = [tf.matmul(tf.expand_dims(x,1),y,transpose_a=True) \
-                for x,y in zip(alphas_unpacks,c_unpacks)]
-
-        self.output = tf.reduce_sum(tf.pack(alpha_mult),
-                reduction_indices=1)
 
 class BiLSTM(object):
     """
     Bidirectional LSTM
     """
-    def __init__(self, input_x,keep_prob,sequence_lengths,
-                  config, num_steps, embedding,name,is_tuple=False):
+    def __init__(self, input_x, keep_prob, sequence_lengths,
+                 config, embedding, name, is_tuple=False,
+                 num_steps=40):
 
         self.batch_size = config.batch_size
         self.size = config.hidden_size
-        self.num_steps = num_steps
+
         self.input_x = input_x
         self.keep_prob = keep_prob
         self.sequence_lengths = sequence_lengths
@@ -116,114 +93,100 @@ class BiLSTM(object):
         self._initial_state = (self._initial_state_fw, self._initial_state_bw)
         inputs = tf.nn.embedding_lookup(embedding, self.input_x)
         inputs = tf.nn.dropout(inputs, self.keep_prob)
-        print('first shape %s'%inputs.get_shape())
+        print('first shape %s' % inputs.get_shape())
 
-        inputs = [tf.squeeze(input_step, [1])
-                  for input_step in tf.split(1, inputs.get_shape()[1], inputs)]
-        #inputs = tf.unpack(inputs,axis=1)
-        print(len(inputs))
-        self.outputs, self.state_fw, self.state_bw \
-                 = tf.nn.bidirectional_rnn(
-                lstm_fw_cell,
-                lstm_bw_cell,
-                inputs,
-                initial_state_fw=self._initial_state[0],
-                initial_state_bw=self._initial_state[1],
-                sequence_length=self.sequence_lengths,scope="BiRNN_%s"%name)
-        self._final_state = (self.state_fw, self.state_bw)
+        (outputs_fw, outputs_bw), (self.state_fw, self.state_bw) = tf.nn.bidirectional_dynamic_rnn(
+            lstm_fw_cell,
+            lstm_bw_cell,
+            inputs,
+            initial_state_fw=self._initial_state[0],
+            initial_state_bw=self._initial_state[1],
+            sequence_length=self.sequence_lengths, scope="BiRNN_%s" % name)
+        self._final_state = (self.state_fw.h, self.state_bw.h)
+        self._state = tf.concat(1, (self.state_fw.h, self.state_bw.h))
+        self._outputs = tf.concat(2, (outputs_fw, outputs_bw))
 
 
 class Model(object):
     """The PTB model."""
 
-    def __init__(self, config, vocab_size, labels_idx,
-                 context_steps, question_steps):
-        
-        labels_size = len(labels_idx)
-        self.labels_idx = labels_idx
-        self.batch_size = config.batch_size
-        self.size = config.hidden_size
+    def __init__(self, config, vocab_size, choices_idx, keep_prob):
+        """
+        choices_idx: Index in the vocabulary corresponding to choices.
+        """
+        n_choices = len(choices_idx)
+        self.choices_idx = choices_idx
+        batch_size = self.batch_size = config.batch_size
+        size = self.size = config.hidden_size
         self.vocab_size = vocab_size
         self.embedding_size = config.embedding_size
-        self.keep_prob = tf.placeholder(tf.float32,shape=(),name='keep_prob')
+        self.keep_prob = keep_prob
 
-        self.context_steps = context_steps
-        self.question_steps = question_steps
-
-        self.q_x = tf.placeholder(tf.int32,[self.batch_size,None])
+        self.q_x = tf.placeholder(tf.int32, [self.batch_size, None])
         self.q_lengths = tf.placeholder(tf.int32, [self.batch_size])
-        print("qu shape: %s"%self.q_x.get_shape())
+        print("qu shape: %s" % self.q_x.get_shape())
 
         self.c_x = tf.placeholder(tf.int32, [self.batch_size, None])
-        self.c_lengths = tf.placeholder(tf.int32, [self.batch_size])
+        c_lengths = self.c_lengths = tf.placeholder(tf.int32, [self.batch_size])
 
-        self.input_y = tf.placeholder(tf.int32, [self.batch_size])
-        self.encoded_y = tf.placeholder(
-            tf.int32, [self.batch_size, labels_size])
+        self.enc_y = tf.placeholder(tf.int32, [self.batch_size])
+        self.bin_y = tf.placeholder(tf.int32, [self.batch_size, n_choices])
+
         # the number of choices
-        self.choices = tf.placeholder(tf.bool, [self.batch_size,labels_size])
+        # self.choices = tf.placeholder(tf.bool, [self.batch_size, n_choices])
 
-        with tf.device("/cpu:0"):
-          embedding = tf.get_variable(
-              "embedding", [self.vocab_size, self.embedding_size], dtype=data_type())
+        embedding = tf.get_variable(
+            "embedding", [self.vocab_size, self.embedding_size], dtype=data_type())
+        choices_embedding = tf.nn.embedding_lookup(embedding, self.choices_idx)
+        print(choices_embedding.get_shape())
 
-        answers_embedding = tf.nn.embedding_lookup(embedding,self.labels_idx)
-        print(answers_embedding.get_shape())
         # bidirectional lstm - context
-        context_lstm = BiLSTM(self.c_x, self.keep_prob,self.c_lengths,
-                               config, self.context_steps, embedding,
-                              name='context')
+        context_lstm = BiLSTM(
+            self.c_x, self.keep_prob, self.c_lengths, config, embedding,
+            name='context')
+        c_outputs = context_lstm._outputs
 
         # bidirectional lstm - question
-        question_lstm = BiLSTM(self.q_x,self.keep_prob, self.q_lengths,
-                config,self.question_steps,embedding, name="question")
+        question_lstm = BiLSTM(
+            self.q_x, self.keep_prob, self.q_lengths, config, embedding,
+            name="question")
+        q_state = question_lstm._state
+        print("state shape: %s" % question_lstm.state_fw.h.get_shape())
 
-        print("state shape: %s"%question_lstm.state_fw.h.get_shape())
+        self._initial_state = context_lstm._initial_state, question_lstm._initial_state
+        self._final_state = context_lstm._final_state, question_lstm._final_state
 
-        self._initial_state = (context_lstm._initial_state,question_lstm._initial_state)
-        self._final_state = (context_lstm._final_state,question_lstm._final_state)
+        # Attention calculation.
+        bilinear_weights = tf.ones([2*size, 2*size])
+        bilinear_weights = tf.get_variable(
+            "bilinear_w", [2*size, 2*size], dtype=data_type())
 
-        q_hidden_state = tf.concat(1,(question_lstm.state_fw.h, question_lstm.state_bw.h))
-
-        attn = Attention(q_hidden_state, context_lstm.outputs,self.batch_size,self.size)
-        print("attn shape: %s"%attn.output.get_shape())
-        self.attn_softmax_W = tf.get_variable("softmax_w",[2*self.size,labels_size],dtype=data_type())
-        #self._attn_logits = tf.matmul(attn.output,self.attn_softmax_W)
-        self._attn_logits = tf.matmul(attn.output,answers_embedding,transpose_b=True)
+        losses = []
+        for i in range(batch_size):
+            curr_c = tf.transpose(c_outputs[i, :c_lengths[i], :])
+            curr_q = tf.expand_dims(q_state[i], dim=0)
+            att_weights = tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c))
+            context_vector = tf.matmul(att_weights, tf.transpose(curr_c))
+            logits = tf.matmul(context_vector, tf.transpose(choices_embedding))[0]
+            losses.append(
+                tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i]))
 
         # Cross-entropy loss over final output.
-        self._cost = cost = tf.reduce_mean(
-            tf.nn.softmax_cross_entropy_with_logits(self._attn_logits, self.encoded_y))
-
-        #self._predictions = tf.argmax(tf.select(self.choices,self._attn_logits,\
-        #        -1000*tf.ones(self._attn_logits.get_shape())), 1)
-        self._predictions = tf.argmax(self._attn_logits,\
-                 1)
-        correct_preds = tf.equal(tf.to_int32(self._predictions), self.input_y)
-        self._acc = tf.reduce_mean(tf.cast(correct_preds, "float"))
-
-        self._lr = tf.Variable(0.0, trainable=False)
+        self._cost = cost = tf.reduce_mean(losses)
         tvars = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
                                           config.max_grad_norm)
-        #optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=1e-3)
+        optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
         self._train_op = optimizer.apply_gradients(
             zip(grads, tvars),
             global_step=tf.contrib.framework.get_or_create_global_step())
-
-        self._new_lr = tf.placeholder(
-            tf.float32, shape=[], name="new_learning_rate")
-        self._lr_update = tf.assign(self._lr, self._new_lr)
-
-        self._test = self.attn_softmax_W
 
     def assign_lr(self, session, lr_value):
         session.run(self._lr_update, feed_dict={self._new_lr: lr_value})
 
     @property
     def test(self):
-        return self._test 
+        return self._test
 
     @property
     def initial_state(self):
@@ -268,198 +231,162 @@ class Config(object):
     max_grad_norm = 10
     hidden_size = 150
     embedding_size = 300
-    max_epoch = 10
-    keep_prob = 0.8
+    max_epoch = 1
+    keep_prob = 1.0
     lr_decay = 0.5
     batch_size = 32
 
-def mask_choices(indices,choices):
+def mask_choices(indices, choices):
     choices_mask = [np.zeros(len(indices)) for x in choices]
-    for i,x in enumerate(choices_mask):
+    for i, x in enumerate(choices_mask):
         curr = x
-        for j,choice in enumerate(choices[i].split(" ")):
+        for j, choice in enumerate(choices[i].split(" ")):
             if choice in indices:
-                curr[indices.index(choice)]=1
+                curr[indices.index(choice)] = 1
         choices_mask[i] = curr
-    return np.array(choices_mask)>0
+    return np.array(choices_mask) > 0
 
 
-def run_epoch(session, model, input, eval_op=None, verbose=False,keep_prob=1):
+def run_epoch(session, model, input, train_op=None, verbose=False,
+              vocab=None):
     """Runs the model on the given data."""
     start_time = time.time()
-    context_steps = model.context_steps
-    question_steps = model.question_steps
+
+    lb = LabelBinarizer()
+    entities = ["@entity" + str(i) for i in range(5)]
+    lb.fit(entities)
+
+    choices_idx  = model.choices_idx
+    ent_ch_dict = dict(zip(entities, choices_idx))
+
     all_accs = []
     for j, batch in enumerate(input):
 
-        questions, context, choices, labels, map, context_lens, qs_lens = batch
-        choices_mask = mask_choices(model.labels_idx,choices)
+        questions, context, choices, labels, choices_map, context_lens, qs_lens = batch
 
-        #print(len(questions))
-        #print(len(context))
-        #print(context[0].shape)
-        #print(context[0][-1])
-        #print(context_lens[0][-1])
-
-        lb = LabelBinarizer()
-        lb.fit(model.labels_idx)
-
-        mapped_labels = lb.transform(labels)
-        actual_labels = [int(lab[-1]) for lab in labels]
-
-        state = session.run(model.initial_state)
-
+        # TODO: Provide choices.
+        enc_labels = [ent_ch_dict[l] for l in labels]
+        bin_labels = lb.transform(labels)
 
         fetches = {
-          "cost": model.cost,
-          "final_state": model.final_state,
-          "predictions": model.predictions,
-          "logits":model.logits,
-          "targets": model.targets,
-          "acc": model.acc,
-          "test": model.test
-        }
-        if eval_op is not None:
-            fetches["eval_op"] = eval_op
+          "cost": model.cost
+          }
+        if train_op is not None:
+            fetches["train_op"] = train_op
 
         feed_dict = {}
-        feed_dict[model.initial_state] = state
         feed_dict[model.c_x] = context
         feed_dict[model.c_lengths] = context_lens
         feed_dict[model.q_x] = questions
         feed_dict[model.q_lengths] = qs_lens
-        feed_dict[model.input_y] = actual_labels
-        feed_dict[model.encoded_y] = mapped_labels
-        feed_dict[model.keep_prob] = keep_prob
-        feed_dict[model.choices] = choices_mask 
+        feed_dict[model.enc_y] = enc_labels
+        feed_dict[model.bin_y] = bin_labels
 
         vals = session.run(fetches, feed_dict)
-        cost = vals["cost"]
-        state = vals["final_state"]
-        #actual_contexts = np.where(np.array(curr_context_lens)>0)[0]
-        #print(len(curr_context_lens))
-        #print(curr_context_lens[0])
-        #print(curr_context_lens)
-        #print(actual_contexts)
-        #print(actual_labels)
-        #logits = vals['logits'][actual_contexts]
-        #batch_labels = np.array(actual_labels)[actual_contexts]
-        #print(mapped_labels)
-        #print(batch_labels)
-        #preds = np.argmax(logits,axis=1)
-        #print(preds)
-        #acc = float(sum(preds==batch_labels))/len(preds)
-        #print(acc)
-        all_accs.append(vals["acc"])
-        if ((verbose) & (j%10==0)):
-            print("batch %s; accuracy: %s" % (j, vals["acc"]))
-            #print(vals['logits'])
-            #print(vals['test'])
-            print("predictions: %s" %vals["predictions"].T)
-            print("labels: %s"%actual_labels)
-            #print("mapped labels: %s"%mapped_labels)
-    return np.mean(all_accs)
+        print(vals["cost"])
+    #     all_accs.append(vals["acc"])
+    #     if ((verbose) & (j%10==0)):
+    #         print("batch %s; accuracy: %s" % (j, vals["acc"]))
+    #         #print(vals['logits'])
+    #         #print(vals['test'])
+    #         print("predictions: %s" %vals["predictions"].T)
+    #         print("labels: %s"%actual_labels)
+    #         #print("mapped labels: %s"%mapped_labels)
+    # return np.mean(all_accs)
 
 
-def main(_):
-    if (os.path.exists(FLAGS.save_path)):
-        shutil.rmtree(FLAGS.save_path)
-    os.makedirs(FLAGS.save_path)
-    t_log = open(os.path.join(FLAGS.save_path,'train.txt'),'w')
-    v_log = open(os.path.join(FLAGS.save_path,'val.txt'),'w')
-    te_log = open(os.path.join(FLAGS.save_path,'test.txt'),'w')
+# def main(_):
+# if (os.path.exists(FLAGS.save_path)):
+#     shutil.rmtree(FLAGS.save_path)
+# os.makedirs(FLAGS.save_path)
+# t_log = open(os.path.join(FLAGS.save_path, 'train.txt'),'w')
+# v_log = open(os.path.join(FLAGS.save_path, 'val.txt'),'w')
+# te_log = open(os.path.join(FLAGS.save_path, 'test.txt'),'w')
+
+data_path = "/home/manoj/oogie-boogie/wdw"
+train_path = os.path.join(data_path, 'test')
+val_path = os.path.join(data_path, 'test')
+test_path = os.path.join(data_path, 'test')
+
+config = Config()
+print("Loading train data from %s" % train_path)
+train = RawInput(rn.load_data(train_path))
+
+# print("Loading val data from %s"%val_path)
+# val = RawInput(rn.load_data(val_path),vocabulary=train.vocab,c_len=train.c_len,\
+#         q_len=train.q_len)
+# if len(train.labels_idx) < len(val.labels_idx):
+#     print("More validation choices than train")
+#
+# print("Loading test data from %s"%test_path)
+# test = RawInput(rn.load_data(test_path),vocabulary=train.vocab,c_len=train.c_len,\
+#         q_len=train.q_len)
+# if len(train.labels_idx) < len(test.labels_idx):
+#     print("More test choices than train")
 
 
-    train_path = os.path.join(FLAGS.data_wdw, 'test')
-    val_path = os.path.join(FLAGS.data_wdw, 'val')
-    test_path = os.path.join(FLAGS.data_wdw, 'test')
+with tf.Graph().as_default():
+    initializer = tf.random_uniform_initializer(-config.init_scale,
+                                                config.init_scale)
+    print("Loading model..")
+    with tf.name_scope("Train"):
+        with tf.variable_scope("Model", reuse=None, initializer=initializer):
+            m = Model(config=config, vocab_size=train.vocab_size,
+                      choices_idx=train.transformed_labels_idx,
+                      keep_prob=config.keep_prob)
 
-    config = Config() 
+        #tf.scalar_summary("Training Loss", m.cost)
+        #tf.scalar_summary("Accuracy",m.acc)
+        #tf.scalar_summary("Learning Rate", m.lr)
 
-    print("Loading train data from %s"%train_path)
-    train = RawInput(rn.load_data(train_path))
+    # sv = tf.train.Supervisor(logdir="/home/manoj")
+    with tf.Session() as session:
+        all_st = time.time()
+        for i in range(config.max_epoch):
+            train_iter = rn.batch_iter(
+                train.contexts, train.questions,
+                train.choices, train.labels, train.choices_map, train.context_lens,
+                train.qs_lens, batch_size=config.batch_size)
+            session.run(tf.initialize_all_variables())
+            train_acc = run_epoch(
+                session, m, train_iter, train_op=m.train_op, verbose=True,
+                vocab=train.vocab)
+#
+#             val_iter = rn.batch_iter(
+#                 val.contexts, val.questions,
+#                 val.choices, val.labels, val.choices_map, val.context_lens,
+#                 val.qs_lens, batch_size=config.batch_size,
+#                 context_num_steps=c_steps,
+#                 question_num_steps=q_steps)
+#
+#             print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
+#             st = time.time()
+#             print("Epoch time: %s"%(time.time()-st))
+#             t_log.write("%s,%s,%s\n"%(i,time.time()-st,train_acc))
+#             print("\nChecking on validation set.")
+#             st = time.time()
+#             val_acc = run_epoch(session, m, val_iter, eval_op=None,
+#                       verbose=False)
+#             print("\nAvg. Val Accuracy: %s\n"%val_acc)
+#             v_log.write("%s,%s,%s\n"%(i,time.time()-st,val_acc))
+#             print("Saving model to %s." % FLAGS.save_path)
+#             sv.saver.save(session, os.path.join(FLAGS.save_path,'model'),\
+#                     global_step=sv.global_step)
+#                 #saver.save(session,FLAGS.save_path,global_step=sv.global_step)
+#         test_iter = rn.batch_iter(
+#             test.contexts, test.questions,
+#             test.choices, test.labels, test.choices_map, test.context_lens,
+#             test.qs_lens, batch_size=config.batch_size,
+#             context_num_steps=c_steps,
+#             question_num_steps=q_steps)
+#         print("\nChecking on test set.")
+#         test_acc = run_epoch(session, m, test_iter, eval_op=None,
+#                       verbose=False)
+#         te_log.write("%s,%s\n"%(time.time()-all_st,test_acc))
+#         print("\nAvg. Test Accuracy: %s\n"%test_acc)
+#         te_log.close()
+#         v_log.close()
+#         t_log.close()
 
-    print("Loading val data from %s"%val_path)
-    val = RawInput(rn.load_data(val_path),vocabulary=train.vocab,c_len=train.c_len,\
-            q_len=train.q_len)
-    if len(train.labels_idx) < len(val.labels_idx):
-        print("More validation choices than train")
-
-    print("Loading test data from %s"%test_path)
-    test = RawInput(rn.load_data(test_path),vocabulary=train.vocab,c_len=train.c_len,\
-            q_len=train.q_len)
-    if len(train.labels_idx) < len(test.labels_idx):
-        print("More test choices than train")
-
-    q_steps = train.q_len
-    c_steps = train.c_len
-    q_steps = 30
-    c_steps = 60
-    print(q_steps)
-    
-    with tf.Graph().as_default():
-        initializer = tf.random_uniform_initializer(-config.init_scale,
-                                                    config.init_scale)
-        print("Loading model..")
-        with tf.name_scope("Train"):
-            with tf.variable_scope("Model", reuse=None, initializer=initializer):
-                m = Model(config=config, vocab_size=train.vocab_size,
-                             labels_idx=train.transformed_labels_idx, context_steps=c_steps,
-                             question_steps = q_steps)
-            #tf.scalar_summary("Training Loss", m.cost)
-            #tf.scalar_summary("Accuracy",m.acc) 
-            #tf.scalar_summary("Learning Rate", m.lr)
-
-        sv = tf.train.Supervisor(logdir=FLAGS.save_path)
-        with sv.managed_session() as session:
-            all_st = time.time()
-            for i in range(config.max_epoch):
-                train_iter = rn.batch_iter(
-                    train.contexts, train.questions,
-                    train.choices, train.labels, train.choices_map, train.context_lens,
-                    train.qs_lens, batch_size=config.batch_size,
-                    context_num_steps=c_steps,
-                    question_num_steps=q_steps)
-                lr_decay = config.lr_decay ** max(i - config.max_epoch, 0.0)
-                m.assign_lr(session, config.learning_rate * lr_decay)
-
-                val_iter = rn.batch_iter(
-                    val.contexts, val.questions,
-                    val.choices, val.labels, val.choices_map, val.context_lens,
-                    val.qs_lens, batch_size=config.batch_size,
-                    context_num_steps=c_steps,
-                    question_num_steps=q_steps)
-
-                print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-                st = time.time()
-                train_acc = run_epoch(session, m, train_iter, eval_op=m.train_op,
-                          verbose=True,keep_prob=config.keep_prob)
-                print("Epoch time: %s"%(time.time()-st))
-                t_log.write("%s,%s,%s\n"%(i,time.time()-st,train_acc))
-                print("\nChecking on validation set.")
-                st = time.time()
-                val_acc = run_epoch(session, m, val_iter, eval_op=None,
-                          verbose=False)
-                print("\nAvg. Val Accuracy: %s\n"%val_acc)
-                v_log.write("%s,%s,%s\n"%(i,time.time()-st,val_acc))
-                print("Saving model to %s." % FLAGS.save_path)
-                sv.saver.save(session, os.path.join(FLAGS.save_path,'model'),\
-                        global_step=sv.global_step)
-                    #saver.save(session,FLAGS.save_path,global_step=sv.global_step)
-            test_iter = rn.batch_iter(
-                test.contexts, test.questions,
-                test.choices, test.labels, test.choices_map, test.context_lens,
-                test.qs_lens, batch_size=config.batch_size,
-                context_num_steps=c_steps,
-                question_num_steps=q_steps)
-            print("\nChecking on test set.")
-            test_acc = run_epoch(session, m, test_iter, eval_op=None,
-                          verbose=False)
-            te_log.write("%s,%s\n"%(time.time()-all_st,test_acc))
-            print("\nAvg. Test Accuracy: %s\n"%test_acc)
-            te_log.close()
-            v_log.close()
-            t_log.close()
-
-if __name__ == "__main__":
-  tf.app.run()
+# if __name__ == "__main__":
+#   tf.app.run()
