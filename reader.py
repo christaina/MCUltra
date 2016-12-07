@@ -259,8 +259,8 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
         end_index = start_index + batch_size
 
         yield (
-            mask_narrow(questions[start_index: end_index]),
-            mask_narrow(contexts[start_index: end_index]),
+            mask_narrow(shuffled_qs[start_index: end_index]),
+            mask_narrow(shuffled_cont[start_index: end_index]),
             shuffled_choices[start_index: end_index],
             shuffled_labels[start_index: end_index],
             shuffled_map[start_index: end_index],
