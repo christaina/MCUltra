@@ -11,6 +11,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelBinarizer
+from sklearn.preprocessing import LabelEncoder
 import reader as rn
 
 flags = tf.flags
@@ -162,15 +163,19 @@ class Model(object):
             "bilinear_w", [2*size, 2*size], dtype=data_type())
 
         losses = []
+        predictions = []
+
         for i in range(batch_size):
             curr_c = tf.transpose(c_outputs[i, :c_lengths[i], :])
             curr_q = tf.expand_dims(q_state[i], dim=0)
             att_weights = tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c))
             context_vector = tf.matmul(att_weights, tf.transpose(curr_c))
             logits = tf.matmul(context_vector, tf.transpose(choices_embedding))[0]
+            predictions.append(tf.argmax(logits, 0))
             losses.append(
                 tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i]))
 
+        self._predictions = predictions
         # Cross-entropy loss over final output.
         self._cost = cost = tf.reduce_mean(losses)
         tvars = tf.trainable_variables()
@@ -236,6 +241,7 @@ class Config(object):
     lr_decay = 0.5
     batch_size = 32
 
+
 def mask_choices(indices, choices):
     choices_mask = [np.zeros(len(indices)) for x in choices]
     for i, x in enumerate(choices_mask):
@@ -256,6 +262,9 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
     entities = ["@entity" + str(i) for i in range(5)]
     lb.fit(entities)
 
+    le = LabelEncoder()
+    le.fit(entities)
+
     choices_idx  = model.choices_idx
     ent_ch_dict = dict(zip(entities, choices_idx))
 
@@ -265,11 +274,11 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
         questions, context, choices, labels, choices_map, context_lens, qs_lens = batch
 
         # TODO: Provide choices.
-        enc_labels = [ent_ch_dict[l] for l in labels]
+        enc_labels = le.transform(labels)
         bin_labels = lb.transform(labels)
 
         fetches = {
-          "cost": model.cost
+          "cost": model.cost, "pred": model.predictions
           }
         if train_op is not None:
             fetches["train_op"] = train_op
@@ -284,6 +293,7 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
 
         vals = session.run(fetches, feed_dict)
         print(vals["cost"])
+        print(vals["pred"])
     #     all_accs.append(vals["acc"])
     #     if ((verbose) & (j%10==0)):
     #         print("batch %s; accuracy: %s" % (j, vals["acc"]))
