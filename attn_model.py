@@ -7,7 +7,6 @@ import os
 import shutil
 
 import numpy as np
-#import bidir_rnn
 import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelBinarizer
@@ -17,20 +16,18 @@ import reader as rn
 flags = tf.flags
 logging = tf.logging
 
-# flags.DEFINE_string("data_wdw", '/home/manoj/oogie-boogie/wdw',
-#                     "Where the training/test data is stored.")
-# flags.DEFINE_string("save_path", './runs/dump',
-#                     "Model output directory.")
-# flags.DEFINE_string("checkpoint_path", './runs/dump',
-#                     "Model output directory.")
-# flags.DEFINE_bool("use_fp16", False,
-#                   "Train using 16-bit floats instead of 32bit floats")
-#
-# FLAGS = flags.FLAGS
+flags.DEFINE_string("data_path", '/home/manoj/oogie-boogie/wdw',
+                    "Where the training/test data is stored.")
+flags.DEFINE_float("init_scale", 0.5, "uniform initialization scale.")
+flags.DEFINE_float("learning_rate", 1e-3, "Adam optimizer learning rate.")
+flags.DEFINE_float("grad_norm", 10.0, "Clip the gradient.")
+flags.DEFINE_integer("hidden_size", 150, "Hidden size of qs / ans RNN.")
+flags.DEFINE_integer("embed_size", 300, "Embedding size.")
+flags.DEFINE_integer("max_epoch", 3, "Max number of epochs.")
+flags.DEFINE_float("keep_prob", 1.0, "Dropout probability.")
+flags.DEFINE_integer("batch_size", 32, "Max number of epochs.")
 
-
-def data_type():
-  return  tf.float32
+FLAGS = flags.FLAGS
 
 class RawInput(object):
     def __init__(self, data_bundle, vocabulary=None):#, c_len=None, q_len=None):
@@ -52,49 +49,32 @@ class RawInput(object):
         self.contexts = rn.vocab_transform(self.contexts, self.vocab)
         self.questions = rn.vocab_transform(self.questions, self.vocab)
 
-        # TODO: choices embedding
-        # if c_len:
-        #     self.contexts = rn.pad_eval(self.contexts, c_len)
-        # if q_len:
-        #     self.questions = rn.pad_eval(self.questions, q_len)
-        # else:
-        #     self.c_len = len(self.contexts[0])
-        #     self.q_len = len(self.questions[0])
-
 
 class BiLSTM(object):
     """
     Bidirectional LSTM
     """
-    def __init__(self, input_x, keep_prob, sequence_lengths,
-                 config, embedding, name, is_tuple=False,
-                 num_steps=40):
+    def __init__(self, input_x, sequence_lengths, embedding, name):
 
-        self.batch_size = config.batch_size
-        self.size = config.hidden_size
+        size = FLAGS.hidden_size
 
         self.input_x = input_x
-        self.keep_prob = keep_prob
         self.sequence_lengths = sequence_lengths
         lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(
-            self.size, forget_bias=0.0, state_is_tuple=True)
+            size, forget_bias=0.0, state_is_tuple=True)
         lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(
-            self.size, forget_bias=0.0, state_is_tuple=True)
-        """
-        if config.keep_prob < 1:
+            size, forget_bias=0.0, state_is_tuple=True)
+        if FLAGS.keep_prob < 1:
           lstm_fw_cell = tf.nn.rnn_cell.DropoutWrapper(
-              lstm_fw_cell, output_keep_prob=config.keep_prob)
+              lstm_fw_cell, output_keep_prob=FLAGS.keep_prob)
           lstm_bw_cell = tf.nn.rnn_cell.DropoutWrapper(
-              lstm_bw_cell, output_keep_prob=config.keep_prob)
-        """
+              lstm_bw_cell, output_keep_prob=FLAGS.keep_prob)
         self._initial_state_fw = lstm_fw_cell.zero_state(
-            self.batch_size, data_type())
+            FLAGS.batch_size, tf.float32)
         self._initial_state_bw = lstm_bw_cell.zero_state(
-            self.batch_size, data_type())
+            FLAGS.batch_size, tf.float32)
         self._initial_state = (self._initial_state_fw, self._initial_state_bw)
         inputs = tf.nn.embedding_lookup(embedding, self.input_x)
-        inputs = tf.nn.dropout(inputs, self.keep_prob)
-        print('first shape %s' % inputs.get_shape())
 
         (outputs_fw, outputs_bw), (self.state_fw, self.state_bw) = tf.nn.bidirectional_dynamic_rnn(
             lstm_fw_cell,
@@ -111,46 +91,40 @@ class BiLSTM(object):
 class Model(object):
     """The PTB model."""
 
-    def __init__(self, config, vocab_size, choices_idx, keep_prob):
+    def __init__(self, vocab_size, choices_idx):
         """
         choices_idx: Index in the vocabulary corresponding to choices.
         """
         n_choices = len(choices_idx)
         self.choices_idx = choices_idx
-        batch_size = self.batch_size = config.batch_size
-        size = self.size = config.hidden_size
+        batch_size = FLAGS.batch_size
+        size = FLAGS.hidden_size
         self.vocab_size = vocab_size
-        self.embedding_size = config.embedding_size
-        self.keep_prob = keep_prob
 
-        self.q_x = tf.placeholder(tf.int32, [self.batch_size, None])
-        self.q_lengths = tf.placeholder(tf.int32, [self.batch_size])
+        self.q_lengths = tf.placeholder(tf.int32, [batch_size])
+        self.q_x = tf.placeholder(tf.int32, [batch_size, None])
         print("qu shape: %s" % self.q_x.get_shape())
 
-        self.c_x = tf.placeholder(tf.int32, [self.batch_size, None])
-        c_lengths = self.c_lengths = tf.placeholder(tf.int32, [self.batch_size])
+        self.c_x = tf.placeholder(tf.int32, [batch_size, None])
+        c_lengths = self.c_lengths = tf.placeholder(tf.int32, [batch_size])
 
-        self.enc_y = tf.placeholder(tf.int32, [self.batch_size])
-        self.bin_y = tf.placeholder(tf.int32, [self.batch_size, n_choices])
+        self.enc_y = tf.placeholder(tf.int64, [batch_size])
+        self.bin_y = tf.placeholder(tf.int32, [batch_size, n_choices])
 
         # the number of choices
         # self.choices = tf.placeholder(tf.bool, [self.batch_size, n_choices])
 
         embedding = tf.get_variable(
-            "embedding", [self.vocab_size, self.embedding_size], dtype=data_type())
+            "embedding", [self.vocab_size, FLAGS.embed_size], dtype=tf.float32)
         choices_embedding = tf.nn.embedding_lookup(embedding, self.choices_idx)
         print(choices_embedding.get_shape())
 
         # bidirectional lstm - context
-        context_lstm = BiLSTM(
-            self.c_x, self.keep_prob, self.c_lengths, config, embedding,
-            name='context')
+        context_lstm = BiLSTM(self.c_x, self.c_lengths, embedding, name='context')
         c_outputs = context_lstm._outputs
 
         # bidirectional lstm - question
-        question_lstm = BiLSTM(
-            self.q_x, self.keep_prob, self.q_lengths, config, embedding,
-            name="question")
+        question_lstm = BiLSTM(self.q_x, self.q_lengths, embedding, name="question")
         q_state = question_lstm._state
         print("state shape: %s" % question_lstm.state_fw.h.get_shape())
 
@@ -160,7 +134,7 @@ class Model(object):
         # Attention calculation.
         bilinear_weights = tf.ones([2*size, 2*size])
         bilinear_weights = tf.get_variable(
-            "bilinear_w", [2*size, 2*size], dtype=data_type())
+            "bilinear_w", [2*size, 2*size], dtype=tf.float32)
 
         losses = []
         predictions = []
@@ -176,70 +150,29 @@ class Model(object):
                 tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i]))
 
         self._predictions = predictions
+        self._acc = tf.reduce_mean(
+            tf.cast(tf.equal(predictions, self.enc_y), dtype=tf.float32))
         # Cross-entropy loss over final output.
         self._cost = cost = tf.reduce_mean(losses)
         tvars = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                          config.max_grad_norm)
-        optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+                                          FLAGS.grad_norm)
+        optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
         self._train_op = optimizer.apply_gradients(
             zip(grads, tvars),
             global_step=tf.contrib.framework.get_or_create_global_step())
-
-    def assign_lr(self, session, lr_value):
-        session.run(self._lr_update, feed_dict={self._new_lr: lr_value})
-
-    @property
-    def test(self):
-        return self._test
-
-    @property
-    def initial_state(self):
-        return self._initial_state
 
     @property
     def acc(self):
         return self._acc
 
     @property
-    def predictions(self):
-        return self._predictions
-
-    @property
     def cost(self):
         return self._cost
 
     @property
-    def logits(self):
-        return self._attn_logits
-
-    @property
-    def targets(self):
-        return self.input_y
-
-    @property
-    def final_state(self):
-        return self._final_state
-
-    @property
-    def lr(self):
-        return self._lr
-
-    @property
     def train_op(self):
         return self._train_op
-
-
-class Config(object):
-    init_scale = 0.1
-    learning_rate = 0.001
-    max_grad_norm = 10
-    hidden_size = 150
-    embedding_size = 300
-    max_epoch = 1
-    keep_prob = 1.0
-    lr_decay = 0.5
-    batch_size = 32
 
 
 def mask_choices(indices, choices):
@@ -269,6 +202,7 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
     ent_ch_dict = dict(zip(entities, choices_idx))
 
     all_accs = []
+    all_costs = []
     for j, batch in enumerate(input):
 
         questions, context, choices, labels, choices_map, context_lens, qs_lens = batch
@@ -277,9 +211,8 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
         enc_labels = le.transform(labels)
         bin_labels = lb.transform(labels)
 
-        fetches = {
-          "cost": model.cost, "pred": model.predictions
-          }
+        fetches = {"cost": model.cost, "acc": model.acc}
+
         if train_op is not None:
             fetches["train_op"] = train_op
 
@@ -290,113 +223,71 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
         feed_dict[model.q_lengths] = qs_lens
         feed_dict[model.enc_y] = enc_labels
         feed_dict[model.bin_y] = bin_labels
-
         vals = session.run(fetches, feed_dict)
-        print(vals["cost"])
-        print(vals["pred"])
-    #     all_accs.append(vals["acc"])
-    #     if ((verbose) & (j%10==0)):
-    #         print("batch %s; accuracy: %s" % (j, vals["acc"]))
-    #         #print(vals['logits'])
-    #         #print(vals['test'])
-    #         print("predictions: %s" %vals["predictions"].T)
-    #         print("labels: %s"%actual_labels)
-    #         #print("mapped labels: %s"%mapped_labels)
-    # return np.mean(all_accs)
+
+        all_accs.append(vals["acc"])
+        all_costs.append(vals["cost"])
+    return np.mean(all_costs), np.mean(all_accs)
 
 
-# def main(_):
-# if (os.path.exists(FLAGS.save_path)):
-#     shutil.rmtree(FLAGS.save_path)
-# os.makedirs(FLAGS.save_path)
-# t_log = open(os.path.join(FLAGS.save_path, 'train.txt'),'w')
-# v_log = open(os.path.join(FLAGS.save_path, 'val.txt'),'w')
-# te_log = open(os.path.join(FLAGS.save_path, 'test.txt'),'w')
+def main(_):
 
-data_path = "/home/manoj/oogie-boogie/wdw"
-train_path = os.path.join(data_path, 'test')
-val_path = os.path.join(data_path, 'test')
-test_path = os.path.join(data_path, 'test')
+    data_path = FLAGS.data_path
+    train_path = os.path.join(data_path, 'train')
+    val_path = os.path.join(data_path, 'val')
+    test_path = os.path.join(data_path, 'test')
 
-config = Config()
-print("Loading train data from %s" % train_path)
-train = RawInput(rn.load_data(train_path))
+    # print("Loading train data from %s" % train_path)
+    train = RawInput(rn.load_data(train_path))
 
-# print("Loading val data from %s"%val_path)
-# val = RawInput(rn.load_data(val_path),vocabulary=train.vocab,c_len=train.c_len,\
-#         q_len=train.q_len)
-# if len(train.labels_idx) < len(val.labels_idx):
-#     print("More validation choices than train")
-#
-# print("Loading test data from %s"%test_path)
-# test = RawInput(rn.load_data(test_path),vocabulary=train.vocab,c_len=train.c_len,\
-#         q_len=train.q_len)
-# if len(train.labels_idx) < len(test.labels_idx):
-#     print("More test choices than train")
+    print("Loading val data from %s"%val_path)
+    val = RawInput(rn.load_data(val_path), vocabulary=train.vocab)
+
+    print("Loading test data from %s" % test_path)
+    test = RawInput(rn.load_data(test_path), vocabulary=train.vocab)
 
 
-with tf.Graph().as_default():
-    initializer = tf.random_uniform_initializer(-config.init_scale,
-                                                config.init_scale)
-    print("Loading model..")
-    with tf.name_scope("Train"):
-        with tf.variable_scope("Model", reuse=None, initializer=initializer):
-            m = Model(config=config, vocab_size=train.vocab_size,
-                      choices_idx=train.transformed_labels_idx,
-                      keep_prob=config.keep_prob)
+    with tf.Graph().as_default():
+        initializer = tf.random_uniform_initializer(-FLAGS.init_scale,
+                                                    FLAGS.init_scale)
+        print("Loading model..")
+        with tf.name_scope("Train"):
+            with tf.variable_scope("Model", reuse=None, initializer=initializer):
+                m = Model(vocab_size=train.vocab_size,
+                          choices_idx=train.transformed_labels_idx)
 
-        #tf.scalar_summary("Training Loss", m.cost)
-        #tf.scalar_summary("Accuracy",m.acc)
-        #tf.scalar_summary("Learning Rate", m.lr)
-
-    # sv = tf.train.Supervisor(logdir="/home/manoj")
-    with tf.Session() as session:
-        all_st = time.time()
-        for i in range(config.max_epoch):
-            train_iter = rn.batch_iter(
-                train.contexts, train.questions,
-                train.choices, train.labels, train.choices_map, train.context_lens,
-                train.qs_lens, batch_size=config.batch_size)
+        with tf.Session() as session:
             session.run(tf.initialize_all_variables())
-            train_acc = run_epoch(
-                session, m, train_iter, train_op=m.train_op, verbose=True,
-                vocab=train.vocab)
-#
-#             val_iter = rn.batch_iter(
-#                 val.contexts, val.questions,
-#                 val.choices, val.labels, val.choices_map, val.context_lens,
-#                 val.qs_lens, batch_size=config.batch_size,
-#                 context_num_steps=c_steps,
-#                 question_num_steps=q_steps)
-#
-#             print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-#             st = time.time()
-#             print("Epoch time: %s"%(time.time()-st))
-#             t_log.write("%s,%s,%s\n"%(i,time.time()-st,train_acc))
-#             print("\nChecking on validation set.")
-#             st = time.time()
-#             val_acc = run_epoch(session, m, val_iter, eval_op=None,
-#                       verbose=False)
-#             print("\nAvg. Val Accuracy: %s\n"%val_acc)
-#             v_log.write("%s,%s,%s\n"%(i,time.time()-st,val_acc))
-#             print("Saving model to %s." % FLAGS.save_path)
-#             sv.saver.save(session, os.path.join(FLAGS.save_path,'model'),\
-#                     global_step=sv.global_step)
-#                 #saver.save(session,FLAGS.save_path,global_step=sv.global_step)
-#         test_iter = rn.batch_iter(
-#             test.contexts, test.questions,
-#             test.choices, test.labels, test.choices_map, test.context_lens,
-#             test.qs_lens, batch_size=config.batch_size,
-#             context_num_steps=c_steps,
-#             question_num_steps=q_steps)
-#         print("\nChecking on test set.")
-#         test_acc = run_epoch(session, m, test_iter, eval_op=None,
-#                       verbose=False)
-#         te_log.write("%s,%s\n"%(time.time()-all_st,test_acc))
-#         print("\nAvg. Test Accuracy: %s\n"%test_acc)
-#         te_log.close()
-#         v_log.close()
-#         t_log.close()
+            all_st = time.time()
+            for i in range(FLAGS.max_epoch):
+                train_iter = rn.batch_iter(
+                    train.contexts, train.questions,
+                    train.choices, train.labels, train.choices_map, train.context_lens,
+                    train.qs_lens, batch_size=FLAGS.batch_size)
+                train_cost, train_acc = run_epoch(
+                    session, m, train_iter, train_op=m.train_op, verbose=False,
+                    vocab=train.vocab)
+                print("Train cost: after " + str(i) + "epoch is " + str(train_cost))
+                print("Train acc: after " + str(i) + "epoch is " + str(train_acc))
 
-# if __name__ == "__main__":
-#   tf.app.run()
+                val_iter = rn.batch_iter(
+                    val.contexts, val.questions,
+                    val.choices, val.labels, val.choices_map, val.context_lens,
+                    val.qs_lens, batch_size=FLAGS.batch_size)
+                val_cost, val_acc = run_epoch(
+                    session, m, val_iter, train_op=None, verbose=False,
+                    vocab=train.vocab)
+                print("Val cost: after " + str(i) + "epoch is " + str(val_cost))
+                print("Val acc: after " + str(i) + "epoch is " + str(val_acc))
+
+        test_iter = rn.batch_iter(
+            test.contexts, test.questions,
+            test.choices, test.labels, test.choices_map, test.context_lens,
+            test.qs_lens, batch_size=FLAGS.batch_size)
+        print("Checking on test set.")
+        test_cost, test_acc = run_epoch(session, m, test_iter, train_op=None,
+                                        verbose=False, vocab=train.vocab)
+        print("Test Accuracy: %s\n" % test_acc)
+
+if __name__ == "__main__":
+    tf.app.run()
