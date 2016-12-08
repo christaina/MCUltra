@@ -18,14 +18,18 @@ logging = tf.logging
 
 flags.DEFINE_string("data_path", '/home/manoj/oogie-boogie/wdw',
                     "Where the training/test data is stored.")
+flags.DEFINE_string("save_path", '/home/manoj/oogie-boogie/checkpoints',
+                    "checkpoints.")
 flags.DEFINE_float("init_scale", 0.5, "uniform initialization scale.")
 flags.DEFINE_float("learning_rate", 1e-3, "Adam optimizer learning rate.")
-flags.DEFINE_float("grad_norm", 10.0, "Clip the gradient.")
+flags.DEFINE_float("grad_norm", 5.0, "Clip the gradient.")
 flags.DEFINE_integer("hidden_size", 150, "Hidden size of qs / ans RNN.")
 flags.DEFINE_integer("embed_size", 300, "Embedding size.")
-flags.DEFINE_integer("max_epoch", 3, "Max number of epochs.")
+flags.DEFINE_integer("max_epoch", 30, "Max number of epochs.")
 flags.DEFINE_float("keep_prob", 1.0, "Dropout probability.")
-flags.DEFINE_integer("batch_size", 32, "Max number of epochs.")
+flags.DEFINE_integer("batch_size", 32, "Batch size.")
+flags.DEFINE_integer("ckpt_steps", 5, "Checkpoint every ckpt_steps")
+
 
 FLAGS = flags.FLAGS
 
@@ -258,7 +262,14 @@ def main(_):
                           choices_idx=train.transformed_labels_idx)
 
         with tf.Session() as session:
-            session.run(tf.initialize_all_variables())
+            saver = tf.train.Saver(tf.all_variables())
+            ckpt = tf.train.get_checkpoint_state(FLAGS.save_path)
+            if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+                print("Loading parameters from %s" % ckpt.model_checkpoint_path)
+                saver.restore(session, ckpt.model_checkpoint_path)
+            else:
+                print("New session.")
+                session.run(tf.initialize_all_variables())
             all_st = time.time()
             for i in range(FLAGS.max_epoch):
                 train_iter = rn.batch_iter(
@@ -268,8 +279,12 @@ def main(_):
                 train_cost, train_acc = run_epoch(
                     session, m, train_iter, train_op=m.train_op, verbose=False,
                     vocab=train.vocab)
-                print("Train cost: after " + str(i) + "epoch is " + str(train_cost))
-                print("Train acc: after " + str(i) + "epoch is " + str(train_acc))
+                print("Train cost: after " + str(i) + " epoch is " + str(train_cost))
+                print("Train acc: after " + str(i) +  "epoch is " + str(train_acc))
+
+                if i % FLAGS.ckpt_steps == 0:
+                    checkpoint_path = os.path.join(FLAGS.save_path, "wdw.ckpt")
+                    saver.save(session, checkpoint_path, global_step=i)
 
                 val_iter = rn.batch_iter(
                     val.contexts, val.questions,
@@ -278,8 +293,8 @@ def main(_):
                 val_cost, val_acc = run_epoch(
                     session, m, val_iter, train_op=None, verbose=False,
                     vocab=train.vocab)
-                print("Val cost: after " + str(i) + "epoch is " + str(val_cost))
-                print("Val acc: after " + str(i) + "epoch is " + str(val_acc))
+                print("Val cost: after " + str(i) + " epoch is " + str(val_cost))
+                print("Val acc: after " + str(i) + " epoch is " + str(val_acc))
 
             test_iter = rn.batch_iter(
                 test.contexts, test.questions,
