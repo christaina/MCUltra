@@ -281,14 +281,14 @@ def main(_):
                 print("Val cost: after " + str(i) + "epoch is " + str(val_cost))
                 print("Val acc: after " + str(i) + "epoch is " + str(val_acc))
 
-        test_iter = rn.batch_iter(
-            test.contexts, test.questions,
-            test.choices, test.labels, test.choices_map, test.context_lens,
-            test.qs_lens, batch_size=FLAGS.batch_size)
-        print("Checking on test set.")
-        test_cost, test_acc = run_epoch(session, m, test_iter, train_op=None,
-                                        verbose=False, vocab=train.vocab)
-        print("Test Accuracy: %s\n" % test_acc)
+            test_iter = rn.batch_iter(
+                test.contexts, test.questions,
+                test.choices, test.labels, test.choices_map, test.context_lens,
+                test.qs_lens, batch_size=FLAGS.batch_size)
+            print("Checking on test set.")
+            test_cost, test_acc = run_epoch(session, m, test_iter, train_op=None,
+                                            verbose=False, vocab=train.vocab)
+            print("Test Accuracy: %s\n" % test_acc)
 
 if __name__ == "__main__":
     tf.app.run()
