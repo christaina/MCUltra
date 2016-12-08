@@ -142,7 +142,8 @@ class Model(object):
         for i in range(batch_size):
             curr_c = tf.transpose(c_outputs[i, :c_lengths[i], :])
             curr_q = tf.expand_dims(q_state[i], dim=0)
-            att_weights = tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c))
+            att_weights = tf.nn.softmax(
+                tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c)), dim=-1)
             context_vector = tf.matmul(att_weights, tf.transpose(curr_c))
             logits = tf.matmul(context_vector, tf.transpose(choices_embedding))[0]
             predictions.append(tf.argmax(logits, 0))
