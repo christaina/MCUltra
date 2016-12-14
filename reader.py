@@ -30,6 +30,18 @@ def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
     return mat[:, ~mask]
 
+def glove_embedding(path,vocab):
+    embs = ([x.split(" ") for x in open(path).read().strip().split("\n")])
+    words = np.array([x[0] for x in embs])
+    mat = np.array([x[1:] for x in embs]).astype(float)
+    mapped_words = [x[0] for x in vocab_transform(words,vocab)]
+    vocab_size = len(vocab.vocabulary_)
+    emb_matrix = np.zeros((vocab_size,mat.shape[1]))
+    set_words = set(mapped_words)
+    for i in range(vocab_size):
+        if i in set_words:
+            emb_matrix[i]=mat[mapped_words.index(i)]
+    return emb_matrix
 
 def vocab_transform(mat, vocab):
     return mask_narrow(np.array(list(vocab.transform(mat))))

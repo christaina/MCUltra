@@ -11,17 +11,20 @@ import tensorflow as tf
 from tensorflow.contrib import learn
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.preprocessing import LabelEncoder
+import logging as lg
 import reader as rn
 
 flags = tf.flags
 logging = tf.logging
 
-flags.DEFINE_string("data_path", '/home/manoj/oogie-boogie/wdw',
+flags.DEFINE_string("data_path", '../who_did_what/Strict/',
                     "Where the training/test data is stored.")
-flags.DEFINE_string("save_path", '/home/manoj/oogie-boogie/checkpoints',
+flags.DEFINE_string("glove_path", '/scratch/ceb545/nlp/project/glove.6B.300d.txt',
+                    "Where the training/test data is stored.")
+flags.DEFINE_string("save_path", './dump',
                     "checkpoints.")
 flags.DEFINE_float("init_scale", 0.5, "uniform initialization scale.")
-flags.DEFINE_float("learning_rate", 1e-3, "Adam optimizer learning rate.")
+flags.DEFINE_float("learning_rate", 0.1, "Adam optimizer learning rate.")
 flags.DEFINE_float("grad_norm", 5.0, "Clip the gradient.")
 flags.DEFINE_integer("hidden_size", 150, "Hidden size of qs / ans RNN.")
 flags.DEFINE_integer("embed_size", 300, "Embedding size.")
@@ -29,6 +32,10 @@ flags.DEFINE_integer("max_epoch", 30, "Max number of epochs.")
 flags.DEFINE_float("keep_prob", 1.0, "Dropout probability.")
 flags.DEFINE_integer("batch_size", 32, "Batch size.")
 flags.DEFINE_integer("ckpt_steps", 5, "Checkpoint every ckpt_steps")
+flags.DEFINE_bool("testing", False, "Run on test data")
+flags.DEFINE_bool("use_glove", False, "Use pre-trained glove embeddings")
+flags.DEFINE_bool("clear_save", False, "Delete checkpoints")
+flags.DEFINE_bool("use_gru", False, "Use gru cells")
 
 
 FLAGS = flags.FLAGS
@@ -58,16 +65,21 @@ class BiLSTM(object):
     """
     Bidirectional LSTM
     """
-    def __init__(self, input_x, sequence_lengths, embedding, name):
-
-        size = FLAGS.hidden_size
+    def __init__(self, input_x, sequence_lengths, embedding,size, name):
 
         self.input_x = input_x
         self.sequence_lengths = sequence_lengths
-        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(
-            size, forget_bias=0.0, state_is_tuple=True)
-        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(
-            size, forget_bias=0.0, state_is_tuple=True)
+        if FLAGS.use_gru:
+            lstm_fw_cell = tf.nn.rnn_cell.GRUCell(
+                size)
+            lstm_bw_cell = tf.nn.rnn_cell.GRUCell(
+                size)
+        else:
+
+            lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(
+                size, forget_bias=0.0, state_is_tuple=True)
+            lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(
+                size, forget_bias=0.0, state_is_tuple=True)
         if FLAGS.keep_prob < 1:
           lstm_fw_cell = tf.nn.rnn_cell.DropoutWrapper(
               lstm_fw_cell, output_keep_prob=FLAGS.keep_prob)
@@ -87,15 +99,19 @@ class BiLSTM(object):
             initial_state_fw=self._initial_state[0],
             initial_state_bw=self._initial_state[1],
             sequence_length=self.sequence_lengths, scope="BiRNN_%s" % name)
-        self._final_state = (self.state_fw.h, self.state_bw.h)
-        self._state = tf.concat(1, (self.state_fw.h, self.state_bw.h))
+        if FLAGS.use_gru:
+            self._final_state = (self.state_fw, self.state_bw)
+            self._state = tf.concat(1, (self.state_fw, self.state_bw))
+        else:
+            self._final_state = (self.state_fw.h, self.state_bw.h)
+            self._state = tf.concat(1, (self.state_fw.h, self.state_bw.h))
         self._outputs = tf.concat(2, (outputs_fw, outputs_bw))
 
 
 class Model(object):
     """The PTB model."""
 
-    def __init__(self, vocab_size, choices_idx):
+    def __init__(self, vocab_size, choices_idx,pre_embedding=None):
         """
         choices_idx: Index in the vocabulary corresponding to choices.
         """
@@ -103,7 +119,12 @@ class Model(object):
         self.choices_idx = choices_idx
         batch_size = FLAGS.batch_size
         size = FLAGS.hidden_size
+        embed_size = FLAGS.embed_size
         self.vocab_size = vocab_size
+        if FLAGS.use_glove:
+            size = pre_embedding.shape[1]/2
+            embed_size = pre_embedding.shape[1]
+            pre_embedding = tf.convert_to_tensor(pre_embedding,dtype=tf.float32)
 
         self.q_lengths = tf.placeholder(tf.int32, [batch_size])
         self.q_x = tf.placeholder(tf.int32, [batch_size, None])
@@ -118,19 +139,29 @@ class Model(object):
         # the number of choices
         # self.choices = tf.placeholder(tf.bool, [self.batch_size, n_choices])
 
-        embedding = tf.get_variable(
-            "embedding", [self.vocab_size, FLAGS.embed_size], dtype=tf.float32)
+        if FLAGS.use_glove:
+            print("Using glove embedding.")
+            train_embedding = tf.get_variable(
+                "pre_embedding", [self.vocab_size, embed_size], dtype=tf.float32)
+
+            embedding = tf.select(tf.equal(tf.reduce_sum(tf.abs(pre_embedding),1),0),\
+                    train_embedding,pre_embedding)
+        else:
+            print("Using own embedding.")
+            embedding = tf.get_variable(
+                "embedding", [self.vocab_size, FLAGS.embed_size], dtype=tf.float32)
+        print('embedding shape : %s'%embedding.get_shape())
         choices_embedding = tf.nn.embedding_lookup(embedding, self.choices_idx)
         print(choices_embedding.get_shape())
 
         # bidirectional lstm - context
-        context_lstm = BiLSTM(self.c_x, self.c_lengths, embedding, name='context')
+        context_lstm = BiLSTM(self.c_x, self.c_lengths, embedding, size,name='context')
         c_outputs = context_lstm._outputs
 
         # bidirectional lstm - question
-        question_lstm = BiLSTM(self.q_x, self.q_lengths, embedding, name="question")
+        question_lstm = BiLSTM(self.q_x, self.q_lengths, embedding, size,name="question")
         q_state = question_lstm._state
-        print("state shape: %s" % question_lstm.state_fw.h.get_shape())
+       # print("state shape: %s" % question_lstm.state_fw.h.get_shape())
 
         self._initial_state = context_lstm._initial_state, question_lstm._initial_state
         self._final_state = context_lstm._final_state, question_lstm._final_state
@@ -238,9 +269,21 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
 def main(_):
 
     data_path = FLAGS.data_path
-    train_path = os.path.join(data_path, 'train')
+    if ((FLAGS.clear_save) & (os.path.exists(FLAGS.save_path))):
+        shutil.rmtree(FLAGS.save_path)
+    if FLAGS.testing:
+        train_path = os.path.join(data_path, 'test')
+    else: 
+        train_path = os.path.join(data_path, 'train')
     val_path = os.path.join(data_path, 'val')
     test_path = os.path.join(data_path, 'test')
+
+    if not os.path.exists(FLAGS.save_path):
+        os.makedirs(FLAGS.save_path)
+
+    log_fi = os.path.join(FLAGS.save_path,'output.log')
+    lg.basicConfig(filename=log_fi,level=lg.DEBUG,\
+    format='%(asctime)s %(message)s')
 
     # print("Loading train data from %s" % train_path)
     train = RawInput(rn.load_data(train_path))
@@ -251,6 +294,10 @@ def main(_):
     print("Loading test data from %s" % test_path)
     test = RawInput(rn.load_data(test_path), vocabulary=train.vocab)
 
+    if FLAGS.glove_path:
+        embedding = rn.glove_embedding(FLAGS.glove_path,train.vocab)
+    else:
+        embedding = None
 
     with tf.Graph().as_default():
         initializer = tf.random_uniform_initializer(-FLAGS.init_scale,
@@ -258,17 +305,24 @@ def main(_):
         print("Loading model..")
         with tf.name_scope("Train"):
             with tf.variable_scope("Model", reuse=None, initializer=initializer):
-                m = Model(vocab_size=train.vocab_size,
+                if FLAGS.use_glove:
+                    m = Model(vocab_size=train.vocab_size,
+                          choices_idx=train.transformed_labels_idx,pre_embedding=embedding)
+                else:
+                    m = Model(vocab_size=train.vocab_size,
                           choices_idx=train.transformed_labels_idx)
+
 
         with tf.Session() as session:
             saver = tf.train.Saver(tf.all_variables())
             ckpt = tf.train.get_checkpoint_state(FLAGS.save_path)
             if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
                 print("Loading parameters from %s" % ckpt.model_checkpoint_path)
+                lg.info("Loading parameters from %s" % ckpt.model_checkpoint_path)
                 saver.restore(session, ckpt.model_checkpoint_path)
             else:
                 print("New session.")
+                lg.info("New session.")
                 session.run(tf.initialize_all_variables())
             all_st = time.time()
             for i in range(FLAGS.max_epoch):
@@ -281,6 +335,8 @@ def main(_):
                     vocab=train.vocab)
                 print("Train cost: after " + str(i) + " epoch is " + str(train_cost))
                 print("Train acc: after " + str(i) +  "epoch is " + str(train_acc))
+                lg.info("Train cost: after " + str(i) + " epoch is " + str(train_cost))
+                lg.info("Train acc: after " + str(i) +  "epoch is " + str(train_acc))
 
                 if i % FLAGS.ckpt_steps == 0:
                     checkpoint_path = os.path.join(FLAGS.save_path, "wdw.ckpt")
@@ -293,6 +349,8 @@ def main(_):
                 val_cost, val_acc = run_epoch(
                     session, m, val_iter, train_op=None, verbose=False,
                     vocab=train.vocab)
+                lg.info("Val cost: after " + str(i) + " epoch is " + str(val_cost))
+                lg.info("Val acc: after " + str(i) + " epoch is " + str(val_acc))
                 print("Val cost: after " + str(i) + " epoch is " + str(val_cost))
                 print("Val acc: after " + str(i) + " epoch is " + str(val_acc))
 
@@ -303,7 +361,10 @@ def main(_):
             print("Checking on test set.")
             test_cost, test_acc = run_epoch(session, m, test_iter, train_op=None,
                                             verbose=False, vocab=train.vocab)
-            print("Test Accuracy: %s\n" % test_acc)
+
+            test_str = ("Test Accuracy: %s\n" % test_acc)
+            print(test_str)
+            lg.info(test_str)
 
 if __name__ == "__main__":
     tf.app.run()
