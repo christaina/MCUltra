@@ -55,9 +55,10 @@ class RawInput(object):
         self.labels_idx = sorted(
             list(set([choice for choices in self.choices for choice in choices]))
         )
-        print(self.contexts[:10])
-        print(self.questions[:10])
-        print(self.labels[:10])
+        print(self.contexts[3])
+        print(self.questions[3])
+        print(self.labels[3])
+        print(self.choices_map[3])
         self.transformed_labels_idx = [x[0] for x in list(self.vocab.transform(self.labels_idx))]
         print(self.transformed_labels_idx)
 
@@ -182,6 +183,8 @@ class Model(object):
 
         losses = []
         predictions = []
+        softmax_weights = tf.get_variable(
+            "softmax_w", [size*2,n_choices], dtype=tf.float32)
 
         for i in range(batch_size):
             curr_c = tf.transpose(c_outputs[i, :c_lengths[i], :])
@@ -189,7 +192,7 @@ class Model(object):
             att_weights = tf.nn.softmax(
                 tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c)), dim=-1)
             context_vector = tf.matmul(att_weights, tf.transpose(curr_c))
-            logits = tf.matmul(context_vector, tf.transpose(choices_embedding))[0]
+            logits = tf.matmul(context_vector, softmax_weights)[0]
             predictions.append(tf.argmax(logits, 0))
             losses.append(
                 tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i]))

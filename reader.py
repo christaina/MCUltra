@@ -25,7 +25,6 @@ def get_vocab(questions, context, min_frequency=10):
     print("done fitting vocab!")
     return vocab_processor
 
-
 def mask_narrow(mat):
     mask = np.all(mat == 0, axis=0)
     return mat[:, ~mask]
@@ -52,7 +51,8 @@ def clean_str(string, choice=False):
     Tokenization/string cleaning for all datasets except for SST.
     Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
     """
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)
+    string = re.sub(r"[^A-Za-z0-9(),@!?\'\`]", " ", string)
+    string = re.sub(r"(\d+),(\d+)", r"\1\2", string)
     string = re.sub(r"\'s", " \'s", string)
     string = re.sub(r"\'ve", " \'ve", string)
     string = re.sub(r"n\'t", " n\'t", string)
@@ -70,6 +70,7 @@ def clean_str(string, choice=False):
     string = string.replace("\\(", "lrb")
     string = string.replace("''", " ")
     string = string.replace("' ", " ")
+    string = re.sub(r" +", " ", string)
     return string.strip().lower()
 
 
@@ -96,7 +97,7 @@ def strip_punctuation(lines, return_len=False):
         lengths = []
 
     for line in lines:
-        tokens = [token for token in clean_str(line).split(' ') if token not in punctuation]
+        tokens = [token for token in clean_str(line).split(' ')]
         stripped_lines.append(' '.join(tokens))
         if return_len:
             lengths.append(len(tokens))
@@ -124,9 +125,15 @@ def encode_choices(context, question, choices, label, i):
             entity_num += 1
         if choice not in context:
             print("choice does not exist in context: %s, id %d" % (choice, i))
+
+    context = context.replace(label,choices_map[label])
+    question = question.replace(label, choices_map[label])
+    label = choices_map[label]
+
+    for choice in sorted(choices_map.keys(),key=lambda x: -len(x)):
         context = context.replace(choice, choices_map[choice])
         question = question.replace(choice, choices_map[choice])
-        label = label.replace(choice, choices_map[choice])
+
     new_choices = [choices_map[x] for x in choices]
     return context, question, new_choices,label,choices_map
 
@@ -153,6 +160,8 @@ def load_data(data_path=None):
 
     questions_file = open(qu_p, "r")
     questions = strip_punctuation(questions_file.readlines())
+    contains_placeholder = len([x for x in questions if '@placeholder' not in x])
+    assert(contains_placeholder==0)
     questions_file.close()
 
     context_file = open(cont_p, "r")
@@ -186,6 +195,20 @@ def load_data(data_path=None):
                     new_choices[i],
                     labels[i], i)
         choices_map_all.append(choices_map)
+
+    with_labels = np.array([i for i in range(len(context))\
+            if labels[i] in context[i].split(" ")])
+    
+
+    print("Examples with missing labels from context: %s"%\
+            (len(context)-len(with_labels)))
+
+    context = np.array(context)[with_labels]
+    questions = np.array(questions)[with_labels]
+    new_choices = np.array(new_choices)[with_labels]
+    labels = np.array(labels)[with_labels]
+    choices_map_all = np.array(choices_map_all)[with_labels]
+
     context_lens = np.array([len(c.split(" ")) for c in context])
     qs_lens = np.array([len(q.split(" ")) for q in questions])
 
@@ -219,7 +242,7 @@ def pad_eval(mat, length):
 def batch_iter(contexts, questions, choices, labels, choices_map,
                context_lens, qs_lens, batch_size=32,
                random_state=None, context_num_steps=None,
-               question_num_steps=None):
+               question_num_steps=None,place_inds = None):
     """
     Generates a batch iterator for a dataset.
     """
@@ -235,29 +258,6 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     sorted_context_inds = np.argsort(context_lens)
     num_batches_per_epoch = int(data_size / batch_size)
 
-    # cont_len = contexts.shape[1]
-    # cont_lim = (cont_len // context_num_steps) * context_num_steps
-    # qs_len = questions.shape[1]
-    # qs_lim = (qs_len // question_num_steps) * question_num_steps
-    #
-    # # Clip contexts
-    # contexts = contexts[:, :min(cont_len, context_num_steps)]
-    #
-    # # Clip questions
-    # questions = questions[:, :min(qs_len, question_num_steps)]
-
-    """
-    # Shuffle the data at each epoch
-    shuffle_indices = rng.permutation(data_indices)
-    shuffled_qs = questions[shuffle_indices]
-    shuffled_cont = contexts[shuffle_indices]
-    shuffled_choices = choices[shuffle_indices]
-    shuffled_map = choices_map[shuffle_indices]
-    shuffled_labels = labels[shuffle_indices]
-    shuf_cont_lens = context_lens[shuffle_indices]
-    shuf_qs_lens = qs_lens[shuffle_indices]
-    """
-
     shuffle_indices = sorted_context_inds
     shuffled_qs = questions[shuffle_indices]
     shuffled_cont = contexts[shuffle_indices]
@@ -266,6 +266,8 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     shuffled_labels = labels[shuffle_indices]
     shuf_cont_lens = context_lens[shuffle_indices]
     shuf_qs_lens = qs_lens[shuffle_indices]
+    if place_inds is not None:
+        shuf_place_inds = place_inds[shuffle_indices]
 
     for batch_num in range(num_batches_per_epoch):
         start_index = batch_num * batch_size
@@ -274,14 +276,22 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
         curr_cont_lens = shuf_cont_lens[start_index: end_index]
         max_qs_lens = np.max(curr_qs_lens)
         max_cont_lens = np.max(curr_cont_lens)
-
-        yield (
-            shuffled_qs[start_index: end_index, :max_qs_lens],
-            shuffled_cont[start_index: end_index, :max_cont_lens],
-            shuffled_choices[start_index: end_index],
-            shuffled_labels[start_index: end_index],
-            shuffled_map[start_index: end_index],
-            curr_cont_lens, curr_qs_lens)
+        if place_inds is not None:
+            yield (
+                shuffled_qs[start_index: end_index, :max_qs_lens],
+                shuffled_cont[start_index: end_index, :max_cont_lens],
+                shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index],
+                shuffled_map[start_index: end_index],
+                curr_cont_lens, curr_qs_lens, shuf_place_inds[start_index: end_index])
+        else:
+            yield (
+                shuffled_qs[start_index: end_index, :max_qs_lens],
+                shuffled_cont[start_index: end_index, :max_cont_lens],
+                shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index],
+                shuffled_map[start_index: end_index],
+                curr_cont_lens, curr_qs_lens)
 
 # Usage:
 # 1. Encode questions and context with identities.
