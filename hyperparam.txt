@@ -1,11 +1,11 @@
 1. Using Choices embedding:
 
 
-2. Without choices embedding
+2. Without choices embedding 9329424
 
 Learning rate = 1e-6, keep_prob=0.5
 
 
-3. Softmax over choices
+3. Softmax over choices 9329428
 
 Learning rate = 1e-6,  keep_prob=0.5
