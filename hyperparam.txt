@@ -1,14 +1,19 @@
-1. Using Choices embedding:
+1. Using Choices embedding [attn_model.py]:
 
 d0.9_lr0.001_h150_glTrue_gruTrue - 0.45 train/ 0.4 val (epoch 5)
 d0.9_lr0.0005_h150_glTrue_gruTrue - 0.51 tr/ 0.435 val (epoch 7)
 
 
-2. Without choices embedding 9329424
+2. Without choices embedding [attn_noprod.py] 9329424
 
 Learning rate = 1e-6, keep_prob=0.5
+(9329560) (LR = 0.0001, keep_prob = 0.8, GRU, glove)
 
 
-3. Softmax over choices 9329428
+3. Softmax over choices [attn_with_choices.py] 9329428
 
 Learning rate = 1e-6,  keep_prob=0.5
+
+
+4. Question placeholder embedding [changeq_attn.py]
+(9329548)
