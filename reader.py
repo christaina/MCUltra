@@ -118,10 +118,19 @@ def encode_choices(context, question, choices, label, i):
     word_ent_map = {}
     new_word = None
     new_label = None
-
-    for choice in choices:
+    # sort shortest to longest
+    choices = sorted(choices,key=lambda x: len(x))
+    
+    for i,choice in enumerate(choices):
         if choice not in choices_map:
             choices_map[choice] = "@entity%s" % entity_num
+            leftover_choices = choices[i+1:]
+            choice_re = re.compile(r'\b%s\b'%choice,re.I)
+            for rem_choice in leftover_choices:
+                if choice_re.search(rem_choice) is not None:
+                    print("found substring choice %s in longer choices %s"\
+                            %(choice,rem_choice))
+                    choices_map[rem_choice] = "@entity%s" % entity_num
             entity_num += 1
         if choice not in context:
             print("choice does not exist in context: %s, id %d" % (choice, i))
