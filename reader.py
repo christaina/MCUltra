@@ -135,13 +135,19 @@ def encode_choices(context, question, choices, label, i):
         if choice not in context:
             print("choice does not exist in context: %s, id %d" % (choice, i))
 
-    context = context.replace(label,choices_map[label])
-    question = question.replace(label, choices_map[label])
+    entity_re = re.compile(r'\b%s\b'%label,re.I)
+    context = re.sub(entity_re,choices_map[label],context)
+    question = re.sub(entity_re,choices_map[label],question)
+    #context = context.replace(label,choices_map[label])
+    #question = question.replace(label, choices_map[label])
     label = choices_map[label]
 
     for choice in sorted(choices_map.keys(),key=lambda x: -len(x)):
-        context = context.replace(choice, choices_map[choice])
-        question = question.replace(choice, choices_map[choice])
+        entity_re = re.compile(r'\b%s\b'%choice,re.I)
+        context = re.sub(entity_re,choices_map[choice],context)
+        question = re.sub(entity_re,choices_map[choice],question)
+        #context = context.replace(choice, choices_map[choice])
+        #question = question.replace(choice, choices_map[choice])
 
     new_choices = [choices_map[x] for x in choices]
     return context, question, new_choices,label,choices_map
@@ -301,16 +307,3 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
                 shuffled_labels[start_index: end_index],
                 shuffled_map[start_index: end_index],
                 curr_cont_lens, curr_qs_lens)
-
-# Usage:
-# 1. Encode questions and context with identities.
-# contexts, questions, new_choices, labels, choices_map_all, context_lens, qs_lens =
-#    load_data(data_path="")
-# 2. Fit vocabulary with questions and context.
-# vocab = get_vocab(contexts, questions)
-# 3. Transform context and questions
-# contexts = vocab_transform(contexts, vocab)
-# questions = vocab_transform(questions, vocab)
-# 4. Give to batch_iter
-# batch_iter(contexts, questions, choices, labels, choices_map,
-#            context_lens, qs_lens,
