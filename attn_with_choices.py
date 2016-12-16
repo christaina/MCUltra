@@ -190,10 +190,11 @@ class Model(object):
                 tf.matmul(curr_q, tf.matmul(bilinear_weights, curr_c)), dim=-1)
             context_vector = tf.matmul(att_weights, tf.transpose(curr_c))
             logits = tf.matmul(context_vector, softmax_weights)[0]
-            logits = logits[ : self.enc_choices[i][-1]]
+            logits = logits[ : self.enc_choices[i][-1] + 1]
             predictions.append(tf.argmax(logits, 0))
+            #print(self.enc_choices[i].get_shape())
             losses.append(
-                tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i][ : self.enc_choices[i][-1]]))
+                tf.nn.softmax_cross_entropy_with_logits(logits, self.bin_y[i][ : self.enc_choices[i][-1] + 1 ]))
 
         self._predictions = predictions
         self._acc = tf.reduce_mean(
@@ -256,7 +257,7 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
 
         feed_dict = {}
         questions, context, choices, labels, choices_map, context_lens, qs_lens = batch
-        enc_choices = [le.transform(c.split(" ")) for c in choices]
+        enc_choices = [sorted(set(le.transform(c.split(" ")))) for c in choices]
         for i, enc_choice in enumerate(enc_choices):
             feed_dict[model.enc_choices[i]] = enc_choice
 
