@@ -7,7 +7,8 @@ d0.9_lr0.0005_h150_glTrue_gruTrue - 0.51 tr/ 0.435 val (epoch 7)
 2. Without choices embedding [attn_noprod.py] 9329424
 
 Learning rate = 1e-6, keep_prob=0.5
-(9329560) (LR = 0.0001, keep_prob = 0.8, GRU, glove)
+(9329560)(alis) (LR = 0.0001, keep_prob = 0.8, GRU, glove 300)
+(9329587)(vincent) (LR = 0.001, keep_prob 0.8, GRU, glove 200)
 
 
 3. Softmax over choices [attn_with_choices.py] 9329428
