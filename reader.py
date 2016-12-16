@@ -45,7 +45,6 @@ def glove_embedding(path,vocab):
 def vocab_transform(mat, vocab):
     return mask_narrow(np.array(list(vocab.transform(mat))))
 
-
 def clean_str(string, choice=False):
     """
     Tokenization/string cleaning for all datasets except for SST.
@@ -120,8 +119,8 @@ def encode_choices(context, question, choices, label, i):
     new_label = None
     # sort shortest to longest
     choices = sorted(choices,key=lambda x: len(x))
-    
-    for i,choice in enumerate(choices):
+
+    for i, choice in enumerate(choices):
         if choice not in choices_map:
             choices_map[choice] = "@entity%s" % entity_num
             leftover_choices = choices[i+1:]
@@ -153,7 +152,7 @@ def encode_choices(context, question, choices, label, i):
     return context, question, new_choices,label,choices_map
 
 
-def load_data(data_path=None):
+def load_data(data_path=None, return_entities=False):
     """
     Return a tuple of a
 
@@ -213,7 +212,7 @@ def load_data(data_path=None):
 
     with_labels = np.array([i for i in range(len(context))\
             if labels[i] in context[i].split(" ")])
-    
+
 
     print("Examples with missing labels from context: %s"%\
             (len(context)-len(with_labels)))
@@ -227,9 +226,24 @@ def load_data(data_path=None):
     context_lens = np.array([len(c.split(" ")) for c in context])
     qs_lens = np.array([len(q.split(" ")) for q in questions])
 
-    return (
-        context, questions, new_choices, labels, choices_map_all,
-        context_lens, qs_lens)
+    if return_entities:
+        entity_indices = []
+        for c in context:
+            entity_dict = {}
+            for word_ind, word in enumerate(c.split(" ")):
+                if word.startswith("@entity"):
+                    entity_dict[word] = word_ind
+            entity_indices.append(
+                list(zip(*sorted(entity_dict.items(), key= lambda x: x[0])))[-1])
+
+    if not return_entities:
+        return (
+            context, questions, new_choices, labels, choices_map_all,
+            context_lens, qs_lens)
+    else:
+        return (
+            context, questions, new_choices, labels, choices_map_all,
+            context_lens, qs_lens, entity_indices)
 
 
 def get_seq_length(lengths, step_ind, num_steps):
@@ -257,7 +271,8 @@ def pad_eval(mat, length):
 def batch_iter(contexts, questions, choices, labels, choices_map,
                context_lens, qs_lens, batch_size=32,
                random_state=None, context_num_steps=None,
-               question_num_steps=None,place_inds = None):
+               question_num_steps=None, place_inds=None,
+               entity_inds=None):
     """
     Generates a batch iterator for a dataset.
     """
@@ -281,6 +296,7 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     shuffled_labels = labels[shuffle_indices]
     shuf_cont_lens = context_lens[shuffle_indices]
     shuf_qs_lens = qs_lens[shuffle_indices]
+    entity_inds = np.array(entity_inds)[shuffle_indices]
     if place_inds is not None:
         shuf_place_inds = place_inds[shuffle_indices]
 
@@ -299,6 +315,15 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
                 shuffled_labels[start_index: end_index],
                 shuffled_map[start_index: end_index],
                 curr_cont_lens, curr_qs_lens, shuf_place_inds[start_index: end_index])
+        elif entity_inds is not None:
+            yield (
+                shuffled_qs[start_index: end_index, :max_qs_lens],
+                shuffled_cont[start_index: end_index, :max_cont_lens],
+                shuffled_choices[start_index: end_index],
+                shuffled_labels[start_index: end_index],
+                shuffled_map[start_index: end_index],
+                curr_cont_lens, curr_qs_lens,
+                entity_inds[start_index: end_index])
         else:
             yield (
                 shuffled_qs[start_index: end_index, :max_qs_lens],
