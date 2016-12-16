@@ -332,7 +332,6 @@ def main(_):
                     m = Model(vocab_size=train.vocab_size,
                           choices_idx=train.transformed_labels_idx)
 
-
         with tf.Session() as session:
             saver = tf.train.Saver(tf.all_variables())
             ckpt = tf.train.get_checkpoint_state(FLAGS.save_path)
