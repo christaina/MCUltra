@@ -2,18 +2,17 @@
 
 d0.9_lr0.001_h150_glTrue_gruTrue - 0.45 train/ 0.4 val (epoch 5)
 d0.9_lr0.0005_h150_glTrue_gruTrue - 0.51 tr/ 0.435 val (epoch 7)
---learning_rate=1e-4 --keep_prob=0.5 --hidden_size=300 --embed_size=600
-lr1e-4 keep_prob=0.5 --hidden_size=300 --embed_size=600 9333191
+lr1e-4 keep_prob=0.5 --hidden_size=300 --embed_size=600 (9333191)
 
-2. Without choices embedding [attn_noprod.py] 9329424
+2. Without choices embedding [attn_noprod.py]
 
-Learning rate = 1e-6, keep_prob=0.5
+(9329424) LR = 1e-6, keep_prob=0.5, 0.34 tr/ 0.28 val / 0.28 test
 (9329560)(alis) (LR = 0.0001, keep_prob = 0.8, GRU, glove 300)
 (9329587)(vincent) noprod_d0.8_lr0.001_h100_glTrue_gruTrue 0.53 tr/0.47 val/0.46 test
 (epoch 6)
 lr1e-4 keep_prob=0.5 --hidden_size=300 --embed_size=600 (9333188)
 
---learning_rate=1e-4 --keep_prob=0.5 --hidden_size=300 --embed_size=600 --grad_norm=1.0 (9333199)
+--learning_rate=1e-4 --keep_prob=0.5 --hidden_size=300 --embed_size=600 --grad_norm=1.0 (9333199) inf
 
 
 3. Softmax over choices [attn_with_choices.py] 9329428
