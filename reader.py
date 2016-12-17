@@ -135,19 +135,23 @@ def encode_choices(context, question, choices, label, i):
             print("choice does not exist in context: %s, id %d" % (choice, i))
 
     entity_re = re.compile(r'\b%s\b'%label,re.I)
-    context = re.sub(entity_re,choices_map[label],context)
-    question = re.sub(entity_re,choices_map[label],question)
+    replace_val = " "+choice_map[label]+" "
+    context = re.sub(entity_re,replace_val,context)
+    question = re.sub(entity_re,replace_val,question)
     #context = context.replace(label,choices_map[label])
     #question = question.replace(label, choices_map[label])
     label = choices_map[label]
 
     for choice in sorted(choices_map.keys(),key=lambda x: -len(x)):
         entity_re = re.compile(r'\b%s\b'%choice,re.I)
-        context = re.sub(entity_re,choices_map[choice],context)
-        question = re.sub(entity_re,choices_map[choice],question)
-        #context = context.replace(choice, choices_map[choice])
+        replace_val = " "+choice_map[choice]+" "
+        context = re.sub(entity_re,choices_map[replace_val],context)
+        question = re.sub(entity_re,choices_map[replace_val],question)
+        #context = context.replace(chochoiceice, choices_map[choice])
         #question = question.replace(choice, choices_map[choice])
 
+    context = re.sub(r" +"," ",context)
+    question = re.sub(r" +"," ",question)
     new_choices = [choices_map[x] for x in choices]
     return context, question, new_choices,label,choices_map
 
