@@ -302,7 +302,8 @@ def batch_iter(contexts, questions, choices, labels, choices_map,
     shuffled_labels = labels[shuffle_indices]
     shuf_cont_lens = context_lens[shuffle_indices]
     shuf_qs_lens = qs_lens[shuffle_indices]
-    entity_inds = np.array(entity_inds)[shuffle_indices]
+    if entity_inds is not None:
+        entity_inds = np.array(entity_inds)[shuffle_indices]
     if place_inds is not None:
         shuf_place_inds = place_inds[shuffle_indices]
 
