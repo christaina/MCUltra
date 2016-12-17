@@ -237,8 +237,10 @@ def load_data(data_path=None, return_entities=False):
             for word_ind, word in enumerate(c.split(" ")):
                 if word.startswith("@entity"):
                     entity_dict[word] = word_ind
-            entity_indices.append(
-                list(zip(*sorted(entity_dict.items(), key= lambda x: x[0])))[-1])
+            temp = list(zip(*sorted(entity_dict.items(), key= lambda x: x[0])))[-1]
+            if len(temp) > 5:
+                print(entity_dict)
+            entity_indices.append(temp)
 
     if not return_entities:
         return (

@@ -15,9 +15,9 @@ lr1e-4 keep_prob=0.5 --hidden_size=300 --embed_size=600 (9333188)
 --learning_rate=1e-4 --keep_prob=0.5 --hidden_size=300 --embed_size=600 --grad_norm=1.0 (9333199) inf
 
 
-3. Softmax over choices [attn_with_choices.py] 9329428
+3. Softmax over choices [attn_with_choices.py]
 
-Learning rate = 1e-6,  keep_prob=0.5
+Learning rate = 0.0005,  keep_prob=0.5 (9335172) 
 
 
 4. Question placeholder embedding [changeq_attn.py]

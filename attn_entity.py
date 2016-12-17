@@ -268,6 +268,9 @@ def run_epoch(session, model, input, train_op=None, verbose=False,
         feed_dict = {}
         print(ent_indices)
         print(choices_map)
+
+        # print(np.max(context_lens))
+
         for i, ent_index in enumerate(ent_indices):
             feed_dict[model.ent_indices[i]] = ent_index
             feed_dict[model.n_choices[i]] = len(ent_index)
