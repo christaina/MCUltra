@@ -190,7 +190,7 @@ class Model(object):
 
         losses = []
         predictions = []
-        correct = []
+        # correct = []
 
         for i in range(batch_size):
             n_entities = self.ent_indices[i].get_shape()
@@ -200,14 +200,15 @@ class Model(object):
             logits = tf.cos(tf.matmul(norm_c, norm_q))
             print(logits.get_shape())
             predictions.append(tf.argmax(logits, 0))
-            correct.append(
-                tf.cast(tf.equal(predictions, self.enc_y[i][: n_choices[i]])), dtype=tf.float32) 
+            #correct.append(
+                #tf.cast(tf.equal(predictions, self.enc_y[i][: self.n_choices[i]])), dtype=tf.float32) 
             losses.append(
                 tf.nn.softmax_cross_entropy_with_logits(
                 logits[:, 0], self.bin_y[i][:self.n_choices[i]]))
 
         self._predictions = predictions
-        self._acc = tf.reduce_mean(correct)
+        self._acc = tf.reduce_mean(
+            tf.cast(tf.equal(predictions, self.enc_y), dtype=tf.float32))
         # Cross-entropy loss over final output.
         self._cost = cost = tf.reduce_mean(losses)
         tvars = tf.trainable_variables()
