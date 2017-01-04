@@ -1,8 +1,0 @@
-gr_clip = 5.0
-New session.
-Train cost: after 0 epoch is 1.325
-Train acc: after 0epoch is 0.338506
-Val cost: after 0 epoch is 1.1891
-Val acc: after 0 epoch is 0.353766
-Checking on test set.
-Test Accuracy: 0.358874
